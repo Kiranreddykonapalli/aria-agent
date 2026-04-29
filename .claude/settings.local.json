@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python generate_synthetic_data.py)",
+      "Bash(python -c \"import pandas as pd; df = pd.read_csv\\('data/raw/florida_health_2024.csv'\\); print\\(df.head\\(5\\).to_string\\(\\)\\); print\\(f'\\\\nShape: {df.shape}'\\); print\\(f'Nulls: {df.isnull\\(\\).sum\\(\\).sum\\(\\)}'\\)\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import sys; print\\(sys.stdin.buffer.read\\(\\).decode\\('utf-8', errors='replace'\\)\\)\")",
+      "Bash(python main.py data/raw/florida_health_2024.csv \"Which Florida counties have the worst health outcomes and what factors drive them?\" --no-report)",
+      "Bash(PYTHONIOENCODING=utf-8 streamlit run app.py)",
+      "Bash(git init *)",
+      "Bash(git add *)"
+    ]
+  }
+}

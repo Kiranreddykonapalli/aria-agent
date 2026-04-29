@@ -1,0 +1,16 @@
+# Secrets
+.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Pipeline outputs
+output/figures/
+output/reports/
+data/processed/
+
+# OS
+.DS_Store
