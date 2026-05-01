@@ -37,6 +37,7 @@ from agents.decision_agent import DecisionAgent
 from agents.forecasting_agent import ForecastingAgent
 from agents.data_prep_agent import DataPrepAgent
 from agents.stats_agent import StatsAgent
+from agents.sql_agent import SQLAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -427,13 +428,34 @@ button[kind="primary"]:hover {
 }
 .stat-nums strong { color: #374151; }
 
+/* ── SQL section ─────────────────────────────────────────── */
+.sql-meta {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: center;
+    font-size: 0.8rem;
+    color: #6b7280;
+    margin-bottom: 0.6rem;
+}
+.sql-meta strong { color: #111827; }
+.sql-chip {
+    background: #f0f4ff;
+    border: 1px solid #c7d7f8;
+    border-radius: 6px;
+    padding: 0.15rem 0.55rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #1a56db;
+}
+
 /* ── Caption ─────────────────────────────────────────────── */
 [data-testid="stCaptionContainer"] { color: #9ca3af; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Session state ─────────────────────────────────────────────────────
-for key, default in [("results", None), ("error", None), ("prep", None)]:
+for key, default in [("results", None), ("error", None), ("prep", None), ("sql", None)]:
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -713,6 +735,95 @@ if uploaded_file or st.session_state.prep:
                     file_name="aria_cleaned.csv",
                     mime="text/csv",
                 )
+
+# ── Ask SQL ───────────────────────────────────────────────────────────
+def _get_active_df() -> pd.DataFrame | None:
+    """Return the best available DataFrame for SQL queries."""
+    import pandas as _pd
+    if st.session_state.prep and st.session_state.prep.get("dataframe") is not None:
+        return st.session_state.prep["dataframe"]
+    if st.session_state.results and st.session_state.results.get("wrangler"):
+        return st.session_state.results["wrangler"]["dataframe"]
+    if uploaded_file is not None:
+        uploaded_file.seek(0)
+        return _pd.read_csv(uploaded_file)
+    if os.path.exists(DEMO_CSV):
+        return _pd.read_csv(DEMO_CSV)
+    return None
+
+if uploaded_file or st.session_state.results or st.session_state.prep:
+    with st.expander("🔍 Ask SQL — Query your data with plain English", expanded=False):
+        st.caption(
+            "Ask any question about your data in plain English. "
+            "Aria will write and run the SQL for you against an in-memory SQLite database."
+        )
+
+        sql_question = st.text_input(
+            "Your question",
+            placeholder='e.g. "Which 5 counties have the highest diabetes rate in 2024?"',
+            key="sql_question_input",
+        )
+        sql_col1, sql_col2 = st.columns([3, 1])
+        run_sql_btn   = sql_col1.button("▶  Run Query", type="primary", use_container_width=True)
+        clear_sql_btn = sql_col2.button("✕ Clear", use_container_width=True, key="clear_sql")
+
+        if clear_sql_btn:
+            st.session_state.sql = None
+            st.rerun()
+
+        if run_sql_btn:
+            if not sql_question.strip():
+                st.error("Enter a question first.")
+            else:
+                df_for_sql = _get_active_df()
+                if df_for_sql is None:
+                    st.error("No data available — upload a CSV or run the demo first.")
+                else:
+                    import time as _time
+                    with st.spinner("Writing and running SQL…"):
+                        t0 = _time.perf_counter()
+                        try:
+                            sql_result = SQLAgent(model=model_id).run(
+                                df_for_sql, sql_question.strip()
+                            )
+                            sql_result["execution_time_ms"] = (_time.perf_counter() - t0) * 1000
+                            st.session_state.sql = sql_result
+                        except Exception as exc:
+                            st.error(f"SQL Agent error: {exc}")
+
+        if st.session_state.sql:
+            s = st.session_state.sql
+
+            # Metadata row
+            rows    = s.get("row_count", 0)
+            elapsed = s.get("execution_time_ms", 0)
+            chart   = s.get("chart_suggestion")
+            st.markdown(
+                f'<div class="sql-meta">'
+                f'<span class="sql-chip">{rows} row{"s" if rows != 1 else ""} returned</span>'
+                f'<span class="sql-chip">{elapsed:.1f} ms</span>'
+                + (f'<span class="sql-chip">💡 try a {chart} chart</span>' if chart else "")
+                + f"</div>",
+                unsafe_allow_html=True,
+            )
+
+            # Explanation
+            if s.get("explanation"):
+                st.markdown(f"**What the query does:** {s['explanation']}")
+
+            # SQL code block
+            st.code(s.get("sql_query", ""), language="sql")
+
+            # Error banner
+            if s.get("error"):
+                st.error(s["error"])
+            else:
+                # Results dataframe
+                result_df = s.get("results_dataframe")
+                if result_df is not None and not result_df.empty:
+                    st.dataframe(result_df, use_container_width=True)
+                else:
+                    st.info("Query returned no rows.")
 
 # ── Error banner ──────────────────────────────────────────────────────
 if st.session_state.error and not st.session_state.results:
