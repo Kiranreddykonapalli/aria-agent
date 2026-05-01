@@ -40,6 +40,7 @@ from agents.stats_agent import StatsAgent
 from agents.sql_agent import SQLAgent
 from agents.quality_agent import QualityAgent
 from agents.pptx_agent import PPTXAgent
+from agents.whatif_agent import WhatIfAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -516,6 +517,7 @@ for key, default in [
     ("results", None), ("error", None), ("prep", None),
     ("sql", None), ("pptx_path", None),
     ("chat_history", []), ("pending_chat", None),
+    ("whatif", None),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -1613,3 +1615,90 @@ if st.session_state.results:
                 reply = f"Sorry, I encountered an error: {exc}"
                 st.error(reply)
         st.session_state.chat_history.append({"role": "assistant", "content": reply})
+
+# ── What-If Simulator ─────────────────────────────────────────────────
+if st.session_state.results:
+    with st.expander("🔮 What-If Simulator — explore hypothetical scenarios", expanded=False):
+        st.caption(
+            "Describe a scenario in plain English. Aria will apply it to a copy of your data "
+            "and estimate the downstream impact on correlated columns."
+        )
+        st.markdown(
+            "**Examples:** &nbsp; `What if obesity dropped 5% in every county?` &nbsp;·&nbsp; "
+            "`What if median income increased by $10,000?` &nbsp;·&nbsp; "
+            "`What if uninsured rate fell to 10% in all counties?`"
+        )
+        wi_scenario = st.text_input(
+            "Your scenario",
+            placeholder="e.g. What if diabetes rate dropped 10% in all counties?",
+            key="whatif_scenario_input",
+        )
+        wi_col1, wi_col2 = st.columns([3, 1])
+        wi_run_btn   = wi_col1.button("🔮 Run Simulation", type="primary", use_container_width=True)
+        wi_clear_btn = wi_col2.button("✕ Clear", use_container_width=True, key="wi_clear")
+
+        if wi_clear_btn:
+            st.session_state.whatif = None
+            st.rerun()
+
+        if wi_run_btn:
+            if not wi_scenario.strip():
+                st.error("Enter a scenario first.")
+            else:
+                r = st.session_state.results
+                with st.spinner("Simulating scenario…"):
+                    try:
+                        st.session_state.whatif = WhatIfAgent(model=model_id).run(
+                            dataframe       = r["wrangler"]["dataframe"],
+                            analyst_output  = r["analyst"],
+                            forecast_output = r["forecast"],
+                            scenario        = wi_scenario.strip(),
+                        )
+                    except Exception as exc:
+                        st.error(f"Simulation failed: {exc}")
+
+        if st.session_state.whatif:
+            wi = st.session_state.whatif
+
+            if wi["scenario_parsed"].get("error"):
+                st.error(f"Could not parse scenario: {wi['scenario_parsed']['error']}")
+            else:
+                parsed  = wi["scenario_parsed"]
+                changes = wi["changes_applied"]
+                impacts = wi["impact_summary"]
+
+                st.markdown(
+                    f"**Scenario:** {parsed.get('interpretation', parsed.get('target_column', ''))}  \n"
+                    f"**Rows changed:** {changes.get('rows_changed', 0):,}  &nbsp;·&nbsp;  "
+                    f"**{parsed['target_column']}:** "
+                    f"{changes.get('original_mean', 0):.4g} → {changes.get('simulated_mean', 0):.4g} "
+                    f"({changes.get('mean_delta', 0):+.4g})"
+                )
+
+                st.divider()
+                st.subheader("Simulated Impact")
+                for line in wi["narrative"].split("\n"):
+                    if line.strip():
+                        st.markdown(line)
+
+                if impacts:
+                    st.divider()
+                    st.caption(
+                        "Estimated downstream effects (based on linear correlations — projections only)"
+                    )
+                    import pandas as _pd
+                    rows = [
+                        {
+                            "Column":         col,
+                            "Correlation r":  f"{imp['correlation']:+.3f}",
+                            "Original Mean":  f"{imp['original_mean']:.4g}",
+                            "Simulated Mean": f"{imp['simulated_mean']:.4g}",
+                            "Est. % Change":  f"{'▲' if imp['estimated_pct_change'] > 0 else '▼'} {abs(imp['estimated_pct_change']):.1f}%",
+                        }
+                        for col, imp in list(impacts.items())[:8]
+                    ]
+                    st.dataframe(_pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+                fig_path = wi.get("figure_path")
+                if fig_path and os.path.exists(fig_path):
+                    st.image(fig_path, use_container_width=True)
