@@ -35,6 +35,7 @@ from agents.email_agent import EmailAgent
 from agents.anomaly_agent import AnomalyAgent
 from agents.decision_agent import DecisionAgent
 from agents.forecasting_agent import ForecastingAgent
+from agents.data_prep_agent import DataPrepAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -365,13 +366,36 @@ button[kind="primary"]:hover {
     margin-top: 0.2rem;
 }
 
+/* ── Data prep ───────────────────────────────────────────── */
+.prep-stat {
+    display: inline-block;
+    background: #f0f4ff;
+    border: 1px solid #c7d7f8;
+    border-radius: 8px;
+    padding: 0.4rem 0.9rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #1a56db;
+    margin-right: 0.5rem;
+    margin-bottom: 0.4rem;
+}
+.prep-warning {
+    background: #fef9c3;
+    border-left: 3px solid #d97706;
+    border-radius: 0 6px 6px 0;
+    padding: 0.5rem 0.8rem;
+    font-size: 0.82rem;
+    color: #78350f;
+    margin-bottom: 0.4rem;
+}
+
 /* ── Caption ─────────────────────────────────────────────── */
 [data-testid="stCaptionContainer"] { color: #9ca3af; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Session state ─────────────────────────────────────────────────────
-for key, default in [("results", None), ("error", None)]:
+for key, default in [("results", None), ("error", None), ("prep", None)]:
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -544,18 +568,103 @@ if demo_btn:
 
 if run_btn:
     q = question_input.strip()
-    if not uploaded_file:
+    if not uploaded_file and not st.session_state.prep:
         st.sidebar.error("Upload a CSV file — or use the Demo button.")
     elif not q:
         st.sidebar.error("Enter a question before running.")
     else:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="wb") as f:
-            f.write(uploaded_file.getbuffer())
-            tmp = f.name
-        try:
-            run_pipeline(tmp, q, model_id)
-        finally:
-            os.unlink(tmp)
+        # Prefer the prep-cleaned CSV if one exists; otherwise use the upload
+        if st.session_state.prep and st.session_state.prep.get("output_path"):
+            run_pipeline(st.session_state.prep["output_path"], q, model_id)
+        else:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".csv", mode="wb") as f:
+                f.write(uploaded_file.getbuffer())
+                tmp = f.name
+            try:
+                run_pipeline(tmp, q, model_id)
+            finally:
+                os.unlink(tmp)
+
+# ── Data Prep expander ────────────────────────────────────────────────
+if uploaded_file or st.session_state.prep:
+    with st.expander("🧹 Data Prep — Optional AI-assisted cleaning", expanded=False):
+        st.caption(
+            "Describe what to clean in plain English. "
+            "Claude will translate your instruction into pandas operations and apply them. "
+            "If you run this, the cleaned data will be used in the main analysis."
+        )
+
+        prep_instruction = st.text_area(
+            "Cleaning instruction",
+            placeholder=(
+                "e.g. Drop rows where age is negative. "
+                "Fill missing income values with the median. "
+                "Remove the passenger_id column."
+            ),
+            height=90,
+            key="prep_instruction_input",
+        )
+        col_run, col_clear = st.columns([2, 1])
+        prep_btn  = col_run.button("🧹 Clean My Data", type="primary", use_container_width=True)
+        clear_btn = col_clear.button("✕ Clear", use_container_width=True)
+
+        if clear_btn:
+            st.session_state.prep = None
+            st.rerun()
+
+        if prep_btn and prep_instruction.strip():
+            if not uploaded_file:
+                st.error("Upload a CSV file first.")
+            else:
+                import pandas as _pd
+                raw_df = _pd.read_csv(uploaded_file)
+                with st.spinner("Claude is planning and applying operations…"):
+                    try:
+                        prep_result = DataPrepAgent(model=model_id).run(
+                            raw_df, prep_instruction.strip()
+                        )
+                        st.session_state.prep = prep_result
+                    except Exception as exc:
+                        st.error(f"Data prep failed: {exc}")
+
+        if st.session_state.prep:
+            p = st.session_state.prep
+            before_r, before_c = p["before_shape"]
+            after_r,  after_c  = p["after_shape"]
+            rows_removed = before_r - after_r
+            cols_removed = before_c - after_c
+
+            st.success("Data prep complete — cleaned CSV will be used in the main analysis.")
+
+            st.markdown(
+                f'<span class="prep-stat">Before: {before_r:,} rows × {before_c} cols</span>'
+                f'<span class="prep-stat">After: {after_r:,} rows × {after_c} cols</span>'
+                f'<span class="prep-stat">Rows removed: {rows_removed:,}</span>'
+                f'<span class="prep-stat">Cols removed: {cols_removed}</span>',
+                unsafe_allow_html=True,
+            )
+
+            if p.get("explanation"):
+                st.markdown(f"**Plan:** {p['explanation']}")
+
+            for w in p.get("warnings", []):
+                st.markdown(
+                    f'<div class="prep-warning">⚠ {w}</div>',
+                    unsafe_allow_html=True,
+                )
+
+            if p.get("operations_skipped"):
+                with st.expander(f"⚠ {len(p['operations_skipped'])} operation(s) skipped"):
+                    for op in p["operations_skipped"]:
+                        st.caption(f"{op.get('type')}: {op.get('error')}")
+
+            with open(p["output_path"], "rb") as fh:
+                st.download_button(
+                    "⬇ Download cleaned CSV",
+                    data=fh.read(),
+                    file_name="aria_cleaned.csv",
+                    mime="text/csv",
+                )
 
 # ── Error banner ──────────────────────────────────────────────────────
 if st.session_state.error and not st.session_state.results:
