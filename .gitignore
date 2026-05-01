@@ -10,6 +10,7 @@ __pycache__/
 # Pipeline outputs
 output/figures/
 output/reports/
+output/data_prep/
 data/processed/
 
 # OS
