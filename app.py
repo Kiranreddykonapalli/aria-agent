@@ -32,6 +32,7 @@ from agents.analyst import Analyst
 from agents.viz_builder import VizBuilder
 from agents.report_writer import ReportWriter
 from agents.email_agent import EmailAgent
+from agents.anomaly_agent import AnomalyAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -214,6 +215,54 @@ button[kind="primary"]:hover {
 }
 .stTabs [aria-selected="true"] { color: #1a56db; }
 
+/* ── Anomaly cards ───────────────────────────────────────── */
+.anomaly-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.9rem;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 0.85rem 1.1rem;
+    margin-bottom: 0.6rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+}
+.anomaly-badge {
+    flex-shrink: 0;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-top: 0.1rem;
+}
+.anomaly-body { flex: 1; min-width: 0; }
+.anomaly-entity {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: #111827;
+    margin-bottom: 0.15rem;
+}
+.anomaly-meta {
+    font-size: 0.78rem;
+    color: #6b7280;
+    margin-bottom: 0.3rem;
+}
+.anomaly-reason {
+    font-size: 0.83rem;
+    color: #374151;
+    line-height: 1.55;
+}
+.severity-pill {
+    display: inline-block;
+    padding: 0.25rem 0.8rem;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-right: 0.4rem;
+}
+
 /* ── Caption ─────────────────────────────────────────────── */
 [data-testid="stCaptionContainer"] { color: #9ca3af; }
 </style>
@@ -318,6 +367,16 @@ def run_pipeline(data_path: str, question: str, model: str) -> None:
                 f"{len(analyst_output['suggested_charts'])} charts planned"
             )
 
+            st.write("🔎 **Anomaly Agent** — detecting statistical anomalies…")
+            anomaly_output = AnomalyAgent(model=model).run(
+                wrangler_output["dataframe"], analyst_output
+            )
+            sc = anomaly_output["severity_counts"]
+            st.write(
+                f"✓ {len(anomaly_output['anomalies'])} anomalies — "
+                f"🔴 {sc['high']} high · 🟠 {sc['medium']} medium · 🟡 {sc['low']} low"
+            )
+
             st.write("📈 **Viz Builder** — rendering charts…")
             viz_output = VizBuilder().run(wrangler_output, analyst_output)
             st.write(
@@ -341,6 +400,7 @@ def run_pipeline(data_path: str, question: str, model: str) -> None:
     st.session_state.results = {
         "wrangler": wrangler_output,
         "analyst":  analyst_output,
+        "anomaly":  anomaly_output,
         "viz":      viz_output,
         "report":   report_output,
         "question": question,
@@ -429,13 +489,14 @@ if not st.session_state.results:
 r        = st.session_state.results
 wrangler = r["wrangler"]
 analyst  = r["analyst"]
+anomaly  = r["anomaly"]
 viz      = r["viz"]
 report   = r["report"]
 question = r["question"]
 
 st.markdown(f"#### Results — *{question}*")
-tab_insights, tab_charts, tab_report = st.tabs(
-    ["💡  Insights", "📊  Charts", "📄  Report"]
+tab_insights, tab_charts, tab_anomalies, tab_report = st.tabs(
+    ["💡  Insights", "📊  Charts", "🔎  Anomalies", "📄  Report"]
 )
 
 # ── Tab 1: Insights ───────────────────────────────────────────────────
@@ -510,7 +571,81 @@ with tab_charts:
                             st.caption(title)
                         st.image(paths[idx], use_container_width=True)
 
-# ── Tab 3: Report ─────────────────────────────────────────────────────
+# ── Tab 3: Anomalies ─────────────────────────────────────────────────
+with tab_anomalies:
+    sc        = anomaly["severity_counts"]
+    all_anom  = anomaly["anomalies"]
+    narrative = anomaly["narrative"]
+
+    # Severity summary badges
+    st.markdown(f"""
+    <div style="display:flex;gap:0.75rem;margin-bottom:1.2rem;flex-wrap:wrap;">
+      <span class="severity-pill" style="background:#fee2e2;color:#991b1b;">
+        🔴 {sc['high']} High
+      </span>
+      <span class="severity-pill" style="background:#ffedd5;color:#9a3412;">
+        🟠 {sc['medium']} Medium
+      </span>
+      <span class="severity-pill" style="background:#fef9c3;color:#854d0e;">
+        🟡 {sc['low']} Low
+      </span>
+      <span class="severity-pill" style="background:#f3f4f6;color:#374151;">
+        Total: {len(all_anom)}
+      </span>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not all_anom:
+        st.info("No anomalies detected.")
+    else:
+        SEV_STYLE = {
+            "high":   ("🔴", "#fee2e2", "#991b1b"),
+            "medium": ("🟠", "#ffedd5", "#9a3412"),
+            "low":    ("🟡", "#fef9c3", "#854d0e"),
+        }
+
+        # Severity filter
+        filter_sev = st.radio(
+            "Show", ["All", "High only", "High + Medium"],
+            horizontal=True, label_visibility="collapsed",
+        )
+        shown = all_anom
+        if filter_sev == "High only":
+            shown = [a for a in all_anom if a["severity"] == "high"]
+        elif filter_sev == "High + Medium":
+            shown = [a for a in all_anom if a["severity"] in ("high", "medium")]
+
+        st.caption(f"Showing {len(shown)} of {len(all_anom)} anomalies")
+
+        for a in shown:
+            icon, bg, fg = SEV_STYLE.get(a["severity"], ("⚪", "#f3f4f6", "#374151"))
+            methods_str  = " · ".join(a.get("methods", [a.get("method", "")]))
+            time_str     = f" · {a['time']}" if a.get("time") is not None else ""
+            st.markdown(f"""
+            <div class="anomaly-card" style="border-left:4px solid {fg}">
+              <span class="anomaly-badge" style="background:{bg};color:{fg};">
+                {icon} {a['severity']}
+              </span>
+              <div class="anomaly-body">
+                <div class="anomaly-entity">{a['entity']}</div>
+                <div class="anomaly-meta">
+                  <strong>{a['column']}</strong> &nbsp;·&nbsp;
+                  value: <code>{a['value']}</code>
+                  {f'&nbsp;·&nbsp; z={a["z_score"]}' if a.get("z_score") else ""}
+                  {time_str} &nbsp;·&nbsp; detected by: {methods_str}
+                </div>
+                <div class="anomaly-reason">{a['reason']}</div>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("Claude's Interpretation")
+    for line in narrative.split("\n"):
+        if line.strip():
+            st.markdown(line)
+
+# ── Tab 4: Report ─────────────────────────────────────────────────────
 with tab_report:
     st.markdown(report["report_text"])
     st.divider()

@@ -21,6 +21,7 @@ import traceback
 
 from .data_wrangler import DataWrangler
 from .analyst import Analyst
+from .anomaly_agent import AnomalyAgent
 from .viz_builder import VizBuilder
 from .report_writer import ReportWriter
 
@@ -38,6 +39,7 @@ class Orchestrator:
         self.model = model
         self.data_wrangler  = DataWrangler()
         self.analyst        = Analyst(model=model)
+        self.anomaly_agent  = AnomalyAgent(model=model)
         self.viz_builder    = VizBuilder()
         self.report_writer  = ReportWriter(model=model)
 
@@ -66,6 +68,9 @@ class Orchestrator:
             "data_quality_report": {},
             "insights":            [],
             "charts_rendered":     0,
+            "anomalies":           [],
+            "anomaly_narrative":   "",
+            "severity_counts":     {"high": 0, "medium": 0, "low": 0},
             "error":               None,
         }
 
@@ -97,7 +102,26 @@ class Orchestrator:
         except Exception:
             return self._fail(result, "Analyst", traceback.format_exc())
 
-        # ── Stage 3: Viz Builder ─────────────────────────────────────
+        # ── Stage 3: Anomaly Agent ───────────────────────────────────
+        _status("\n" + _DIV)
+        _status("  Anomaly Agent  —  detecting statistical anomalies")
+        _status(_DIV)
+        try:
+            anomaly_output = self.anomaly_agent.run(
+                wrangler_output["dataframe"], analyst_output
+            )
+            result["anomalies"]         = anomaly_output["anomalies"]
+            result["anomaly_narrative"] = anomaly_output["narrative"]
+            result["severity_counts"]   = anomaly_output["severity_counts"]
+            sc = anomaly_output["severity_counts"]
+            _status(
+                f"  OK  {len(anomaly_output['anomalies'])} anomalies — "
+                f"high={sc['high']} medium={sc['medium']} low={sc['low']}"
+            )
+        except Exception:
+            return self._fail(result, "Anomaly Agent", traceback.format_exc())
+
+        # ── Stage 4: Viz Builder ─────────────────────────────────────
         _status("\n" + _DIV)
         _status("  Viz Builder  —  rendering charts")
         _status(_DIV)
@@ -114,7 +138,7 @@ class Orchestrator:
         except Exception:
             return self._fail(result, "Viz Builder", traceback.format_exc())
 
-        # ── Stage 4: Report Writer ───────────────────────────────────
+        # ── Stage 5: Report Writer ───────────────────────────────────
         _status("\n" + _DIV)
         _status("  Report Writer  —  composing final report")
         _status(_DIV)
