@@ -1,64 +1,37 @@
 """
-Data Wrangler: loads raw healthcare data and prepares it for analysis.
+Data Wrangler: loads, validates, and cleans any tabular CSV dataset.
 
 Responsibilities:
-  - Load CSV from data/raw/
-  - Validate schema (required columns present)
-  - Enforce correct dtypes (year/population as int, rates as float)
-  - Check for nulls and duplicate rows
-  - Flag suspicious values (rates outside 0-1, negative populations)
+  - Load any CSV file
+  - Validate minimum shape (>= 2 columns, >= 10 rows)
+  - Auto-detect and coerce column types (numeric, datetime, categorical)
+  - Drop null rows and exact duplicate rows
+  - Flag data quality issues (high-null columns, constant columns,
+    negative values, suspicious proportions)
   - Emit a data_quality_report dict summarising all findings
-  - Save cleaned data to data/processed/florida_health_clean.csv
+  - Save cleaned data to data/processed/<input_stem>_clean.csv
   - Return dict with keys: dataframe, data_quality_report, file_path
 
 No Claude API calls — pure pandas.
 Raw source files are never modified.
+Works with any tabular dataset — no column names are hardcoded.
 """
 
 import os
+import warnings
+from pathlib import Path
 
 import pandas as pd
 
-EXPECTED_COLUMNS: list[str] = [
-    "county",
-    "year",
-    "population",
-    "uninsured_rate",
-    "obesity_rate",
-    "diabetes_rate",
-    "mental_health_days",
-    "physical_health_days",
-    "primary_care_physicians_rate",
-    "median_household_income",
-    "high_school_graduation_rate",
-    "unemployment_rate",
-    "health_outcome_rank",
-    "health_factor_rank",
-]
+MIN_COLUMNS = 2
+MIN_ROWS    = 10
 
-# Columns that must sit in [0, 1] (they are proportions/rates).
-RATE_COLUMNS: list[str] = [
-    "uninsured_rate",
-    "obesity_rate",
-    "diabetes_rate",
-    "high_school_graduation_rate",
-    "unemployment_rate",
-]
+# Columns where >N% of values are null are flagged in the report.
+HIGH_NULL_THRESHOLD = 0.20
 
-INT_COLUMNS: list[str] = ["year", "population", "health_outcome_rank", "health_factor_rank"]
-FLOAT_COLUMNS: list[str] = [
-    "uninsured_rate",
-    "obesity_rate",
-    "diabetes_rate",
-    "mental_health_days",
-    "physical_health_days",
-    "primary_care_physicians_rate",
-    "median_household_income",
-    "high_school_graduation_rate",
-    "unemployment_rate",
-]
-
-OUTPUT_FILENAME = "florida_health_clean.csv"
+# Minimum fraction of values that must parse successfully to accept
+# a type coercion (datetime or numeric).
+COERCE_ACCEPT_RATE = 0.80
 
 
 class DataWrangler:
@@ -67,21 +40,21 @@ class DataWrangler:
 
     def run(self, raw_path: str) -> dict:
         """
-        Load, validate, and clean the raw healthcare CSV.
+        Load, validate, and clean a CSV file.
 
         Args:
-            raw_path: Path to the raw CSV file.
+            raw_path: Path to any CSV file.
 
         Returns:
             dict with keys:
-              - "dataframe":          pd.DataFrame — cleaned dataset
-              - "data_quality_report": dict — full quality summary
-              - "file_path":          str — path to saved cleaned CSV
+              - "dataframe":           pd.DataFrame — cleaned dataset
+              - "data_quality_report": dict         — full quality summary
+              - "file_path":           str          — path to saved cleaned CSV
         """
         df = self._load(raw_path)
-        self._validate_schema(df)
+        self._validate_shape(df)
         df, report = self._clean(df)
-        file_path = self._save(df)
+        file_path = self._save(df, raw_path)
         report["output_file"] = file_path
         return {"dataframe": df, "data_quality_report": report, "file_path": file_path}
 
@@ -90,153 +63,202 @@ class DataWrangler:
     # ------------------------------------------------------------------
 
     def _load(self, path: str) -> pd.DataFrame:
-        """Load CSV into a DataFrame."""
+        """Load a CSV into a DataFrame."""
         if not os.path.exists(path):
-            raise FileNotFoundError(f"Raw data file not found: {path}")
-        if not path.endswith(".csv"):
-            raise ValueError(f"Expected a CSV file, got: {path}")
-        df = pd.read_csv(path)
-        return df
+            raise FileNotFoundError(f"Data file not found: {path}")
+        if not path.lower().endswith(".csv"):
+            raise ValueError(f"Expected a .csv file, got: {path}")
+        return pd.read_csv(path)
 
-    def _validate_schema(self, df: pd.DataFrame) -> None:
-        """Raise ValueError listing every missing required column."""
-        missing = [col for col in EXPECTED_COLUMNS if col not in df.columns]
-        if missing:
-            raise ValueError(f"Missing required columns: {missing}")
+    def _validate_shape(self, df: pd.DataFrame) -> None:
+        """Reject files that are too small to analyse meaningfully."""
+        if df.shape[1] < MIN_COLUMNS:
+            raise ValueError(
+                f"Dataset has {df.shape[1]} column(s); "
+                f"at least {MIN_COLUMNS} required."
+            )
+        if df.shape[0] < MIN_ROWS:
+            raise ValueError(
+                f"Dataset has {df.shape[0]} row(s); "
+                f"at least {MIN_ROWS} required."
+            )
 
     def _clean(self, df: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
-        """
-        Run all cleaning steps in sequence and build the quality report.
-        Steps are applied in order; each step records its findings.
-        """
+        """Run all cleaning steps and build the quality report."""
         report: dict = {
-            "raw_row_count": len(df),
-            "raw_column_count": len(df.columns),
-            "null_count_by_column": {},
-            "nulls_dropped": 0,
+            "raw_row_count":         int(len(df)),
+            "raw_column_count":      int(len(df.columns)),
+            "null_count_by_column":  {},
+            "high_null_columns":     {},
+            "nulls_dropped":         0,
             "duplicate_rows_dropped": 0,
-            "dtype_coercions": [],
-            "suspicious_values": [],
-            "final_row_count": 0,
-            "final_column_count": 0,
+            "dtype_coercions":       [],
+            "column_types_detected": {},
+            "suspicious_values":     [],
+            "final_row_count":       0,
+            "final_column_count":    0,
         }
 
         df = df.copy()
         df = self._check_nulls(df, report)
         df = self._drop_duplicates(df, report)
-        df = self._enforce_dtypes(df, report)
+        df = self._detect_and_coerce_types(df, report)
         self._flag_suspicious(df, report)
 
-        report["final_row_count"] = len(df)
-        report["final_column_count"] = len(df.columns)
+        report["final_row_count"]   = int(len(df))
+        report["final_column_count"] = int(len(df.columns))
         return df, report
 
     def _check_nulls(self, df: pd.DataFrame, report: dict) -> pd.DataFrame:
-        """Record null counts per column, then drop any rows that have nulls."""
+        """
+        Record per-column null counts and flag heavily-null columns,
+        then drop all rows containing any null.
+        """
+        null_pct   = df.isnull().mean()
         null_counts = df.isnull().sum()
-        report["null_count_by_column"] = null_counts[null_counts > 0].to_dict()
-        total_nulls = int(null_counts.sum())
 
-        if total_nulls > 0:
+        report["null_count_by_column"] = {
+            col: int(n) for col, n in null_counts.items() if n > 0
+        }
+        report["high_null_columns"] = {
+            col: f"{pct:.0%}"
+            for col, pct in null_pct.items()
+            if pct > HIGH_NULL_THRESHOLD
+        }
+
+        if int(null_counts.sum()) > 0:
             before = len(df)
             df = df.dropna()
             report["nulls_dropped"] = before - len(df)
+
         return df
 
     def _drop_duplicates(self, df: pd.DataFrame, report: dict) -> pd.DataFrame:
-        """Drop exact duplicate rows; a (county, year) pair must be unique."""
+        """Drop exact duplicate rows."""
         before = len(df)
         df = df.drop_duplicates()
-
-        # Also enforce (county, year) uniqueness — keep first occurrence.
-        df = df.drop_duplicates(subset=["county", "year"], keep="first")
         report["duplicate_rows_dropped"] = before - len(df)
         return df
 
-    def _enforce_dtypes(self, df: pd.DataFrame, report: dict) -> pd.DataFrame:
-        """Coerce columns to their expected dtypes, recording any that needed fixing."""
-        for col in INT_COLUMNS:
-            if col not in df.columns:
+    def _detect_and_coerce_types(self, df: pd.DataFrame, report: dict) -> pd.DataFrame:
+        """
+        Auto-detect the best dtype for every column.
+
+        Priority order for object/string columns:
+          1. datetime  — if >= 80 % of values parse with pd.to_datetime
+          2. numeric   — if >= 80 % of values parse with pd.to_numeric;
+                         downcast to integer when all values are whole numbers
+          3. categorical — leave as string, strip whitespace
+
+        Already-numeric columns are kept as-is but downcast to int
+        when all values are whole numbers (no fractional part).
+        """
+        detected: dict[str, str] = {}
+
+        for col in df.columns:
+            series = df[col]
+
+            # ── Already datetime ─────────────────────────────────────
+            if pd.api.types.is_datetime64_any_dtype(series):
+                detected[col] = "datetime"
                 continue
-            if not pd.api.types.is_integer_dtype(df[col]):
-                df[col] = pd.to_numeric(df[col], errors="coerce").astype("Int64")
-                report["dtype_coercions"].append(f"{col} -> Int64")
 
-        for col in FLOAT_COLUMNS:
-            if col not in df.columns:
+            # ── Already numeric ──────────────────────────────────────
+            if pd.api.types.is_numeric_dtype(series):
+                non_null = series.dropna()
+                if len(non_null) > 0 and (non_null % 1 == 0).all():
+                    df[col] = series.astype("Int64")
+                    detected[col] = "integer"
+                    report["dtype_coercions"].append(f"{col}: float -> Int64")
+                else:
+                    detected[col] = "numeric"
                 continue
-            if not pd.api.types.is_float_dtype(df[col]):
-                df[col] = pd.to_numeric(df[col], errors="coerce").astype(float)
-                report["dtype_coercions"].append(f"{col} -> float")
 
-        if "county" in df.columns:
-            df["county"] = df["county"].astype(str).str.strip()
+            # ── Object: strip whitespace ─────────────────────────────
+            df[col] = series.astype(str).str.strip()
+            series  = df[col]
 
+            # ── Try datetime ─────────────────────────────────────────
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                parsed_dt = pd.to_datetime(series, errors="coerce")
+            dt_success = parsed_dt.notna().mean()
+            if dt_success >= COERCE_ACCEPT_RATE:
+                df[col]     = parsed_dt
+                detected[col] = "datetime"
+                report["dtype_coercions"].append(f"{col}: object -> datetime")
+                continue
+
+            # ── Try numeric ──────────────────────────────────────────
+            parsed_num  = pd.to_numeric(series, errors="coerce")
+            num_success = parsed_num.notna().mean()
+            if num_success >= COERCE_ACCEPT_RATE:
+                non_null = parsed_num.dropna()
+                if len(non_null) > 0 and (non_null % 1 == 0).all():
+                    df[col]     = parsed_num.astype("Int64")
+                    detected[col] = "integer"
+                    report["dtype_coercions"].append(f"{col}: object -> Int64")
+                else:
+                    df[col]     = parsed_num
+                    detected[col] = "numeric"
+                    report["dtype_coercions"].append(f"{col}: object -> float")
+                continue
+
+            # ── Categorical ──────────────────────────────────────────
+            detected[col] = "categorical"
+
+        report["column_types_detected"] = detected
         return df
 
     def _flag_suspicious(self, df: pd.DataFrame, report: dict) -> None:
         """
-        Identify values that are technically present but statistically implausible.
-        Findings are appended to report["suspicious_values"] as description strings.
-        Does not drop rows — flags only.
+        Generic suspicious-value checks that work for any dataset.
+        Appends human-readable strings to report["suspicious_values"].
+        Rows are never dropped — these are flags only.
         """
         issues: list[str] = []
 
-        # Rates must be strictly between 0 and 1.
-        for col in RATE_COLUMNS:
-            if col not in df.columns:
-                continue
-            bad = df[(df[col] < 0) | (df[col] > 1)]
-            if not bad.empty:
+        # Constant columns (one unique value — useless for analysis)
+        for col in df.columns:
+            if df[col].nunique(dropna=True) <= 1:
                 issues.append(
-                    f"{col}: {len(bad)} value(s) outside [0, 1] "
-                    f"(min={df[col].min():.4f}, max={df[col].max():.4f})"
+                    f"'{col}' has only {df[col].nunique()} unique value(s) — "
+                    "may be constant or all-null after cleaning"
                 )
 
-        # Population must be positive.
-        if "population" in df.columns:
-            neg_pop = df[df["population"] <= 0]
-            if not neg_pop.empty:
+        numeric_cols = df.select_dtypes(include="number").columns
+
+        # Columns with any negative values (flag for review — may be legitimate)
+        for col in numeric_cols:
+            n_neg = int((df[col] < 0).sum())
+            if n_neg > 0:
                 issues.append(
-                    f"population: {len(neg_pop)} non-positive value(s) — "
-                    f"counties: {neg_pop['county'].tolist()}"
+                    f"'{col}' contains {n_neg} negative value(s) "
+                    f"(min = {df[col].min():.4g})"
                 )
 
-        # mental_health_days and physical_health_days should be in [0, 30].
-        for col in ("mental_health_days", "physical_health_days"):
-            if col not in df.columns:
-                continue
-            bad = df[(df[col] < 0) | (df[col] > 30)]
-            if not bad.empty:
-                issues.append(f"{col}: {len(bad)} value(s) outside [0, 30]")
-
-        # primary_care_physicians_rate (per 100k) should be > 0.
-        if "primary_care_physicians_rate" in df.columns:
-            bad = df[df["primary_care_physicians_rate"] < 0]
-            if not bad.empty:
+        # Columns that look like proportions (most values 0-1) but leak outside
+        for col in numeric_cols:
+            s        = df[col].dropna()
+            in_range = ((s >= 0) & (s <= 1)).mean()
+            # Smells like a proportion column but isn't fully clean
+            if 0.70 < in_range < 1.0:
+                n_out = int(((s < 0) | (s > 1)).sum())
                 issues.append(
-                    f"primary_care_physicians_rate: {len(bad)} negative value(s)"
+                    f"'{col}' appears to be a proportion "
+                    f"but has {n_out} value(s) outside [0, 1]"
                 )
-
-        # Health ranks must be between 1 and 67.
-        for col in ("health_outcome_rank", "health_factor_rank"):
-            if col not in df.columns:
-                continue
-            bad = df[(df[col] < 1) | (df[col] > 67)]
-            if not bad.empty:
-                issues.append(f"{col}: {len(bad)} value(s) outside [1, 67]")
-
-        # Year must be in expected range.
-        if "year" in df.columns:
-            bad = df[(df["year"] < 2000) | (df["year"] > 2100)]
-            if not bad.empty:
-                issues.append(f"year: {len(bad)} value(s) outside plausible range")
 
         report["suspicious_values"] = issues if issues else ["none detected"]
 
-    def _save(self, df: pd.DataFrame) -> str:
-        """Write cleaned DataFrame to data/processed/. Returns the saved path."""
+    def _save(self, df: pd.DataFrame, raw_path: str) -> str:
+        """
+        Save cleaned DataFrame to data/processed/<input_stem>_clean.csv.
+        Output filename is derived from the input filename so any dataset
+        gets a distinct clean file.
+        """
         os.makedirs(self.processed_dir, exist_ok=True)
-        path = os.path.join(self.processed_dir, OUTPUT_FILENAME)
+        stem = Path(raw_path).stem
+        path = os.path.join(self.processed_dir, f"{stem}_clean.csv")
         df.to_csv(path, index=False)
         return path
