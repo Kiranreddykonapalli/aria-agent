@@ -27,9 +27,12 @@ SYSTEM_PROMPT = (
     "Always respond with valid JSON only. No markdown, no explanation outside the JSON."
 )
 
-ZSCORE_HIGH_THRESHOLD = 4.0   # z >= 4 → high on its own
-ZSCORE_MED_THRESHOLD  = 3.0   # z >= 3 → medium (entry point for z-score)
-MAX_NARRATIVE_ITEMS   = 20    # cap anomalies sent to Claude
+ZSCORE_HIGH_THRESHOLD    = 4.0   # z >= 4 → high on its own
+ZSCORE_MED_THRESHOLD     = 3.0   # z >= 3 → medium (entry point for z-score)
+ZSCORE_POPULATION_THRESH = 5.0   # population columns need a higher bar — high natural variance
+MAX_ANOMALIES            = 30    # cap returned anomalies; keep highest severity + z-score
+MAX_NARRATIVE_ITEMS      = 20    # cap anomalies sent to Claude
+MIN_PRACTICAL_DELTA_PCT  = 5.0   # skip anomalies where |value - mean| < 5 % of mean
 
 _SEVERITY_RANK = {"high": 2, "medium": 1, "low": 0}
 
@@ -66,7 +69,7 @@ class AnomalyAgent:
         if time_col and entity_col:
             anomalies.extend(self._detect_yoy(dataframe, metric_cols, entity_col, time_col))
 
-        anomalies       = self._merge(anomalies)
+        anomalies       = self._merge(anomalies)[:MAX_ANOMALIES]
         severity_counts = self._count_severity(anomalies)
         narrative       = self._interpret(anomalies[:MAX_NARRATIVE_ITEMS], col_desc, insights)
 
@@ -112,11 +115,20 @@ class AnomalyAgent:
             if std == 0:
                 continue
             mean = s.mean()
+
+            # Population columns have high natural variance across entities;
+            # require a stricter threshold to avoid flooding with size outliers.
+            is_population = "population" in col.lower()
+            z_threshold   = ZSCORE_POPULATION_THRESH if is_population else ZSCORE_MED_THRESHOLD
+
             for idx, val in df[col].items():
                 if pd.isna(val):
                     continue
                 z = abs((val - mean) / std)
-                if z < ZSCORE_MED_THRESHOLD:
+                if z < z_threshold:
+                    continue
+                # Skip if the practical difference from the mean is trivially small.
+                if mean != 0 and abs(val - mean) / abs(mean) * 100 < MIN_PRACTICAL_DELTA_PCT:
                     continue
                 entity   = str(df.loc[idx, entity_col]) if entity_col else f"row {idx}"
                 time_val = df.loc[idx, time_col] if time_col else None
@@ -145,15 +157,24 @@ class AnomalyAgent:
     ) -> list[dict]:
         results = []
         for col in cols:
+            # Population columns are skipped for IQR — they are structurally
+            # bimodal (tiny rural vs large urban) so IQR flags are meaningless.
+            if "population" in col.lower():
+                continue
+
             s   = df[col].dropna()
             q1, q3 = s.quantile(0.25), s.quantile(0.75)
             iqr = q3 - q1
             if iqr == 0:
                 continue
+            mean        = s.mean()
             lower, upper = q1 - 1.5 * iqr, q3 + 1.5 * iqr
 
             for idx, val in df[col].items():
                 if pd.isna(val) or lower <= val <= upper:
+                    continue
+                # Skip trivially small deviations from the mean.
+                if mean != 0 and abs(val - mean) / abs(mean) * 100 < MIN_PRACTICAL_DELTA_PCT:
                     continue
                 entity   = str(df.loc[idx, entity_col]) if entity_col else f"row {idx}"
                 time_val = df.loc[idx, time_col] if time_col else None
@@ -186,7 +207,7 @@ class AnomalyAgent:
         results   = []
         df_sorted = df.sort_values([entity_col, time_col])
 
-        for col in cols:
+        for col in [c for c in cols if "population" not in c.lower()]:
             # Build reference distribution of absolute changes across all entities
             all_abs_changes: list[float] = []
             for _, grp in df_sorted.groupby(entity_col, sort=False):
