@@ -15,5 +15,6 @@ from .pptx_agent import PPTXAgent
 from .comparison_agent import ComparisonAgent
 from .whatif_agent import WhatIfAgent
 from .debate_agent import DebateAgent
+from .blindspot_agent import BlindSpotAgent
 
-__all__ = ["Orchestrator", "DataWrangler", "Analyst", "VizBuilder", "ReportWriter", "EmailAgent", "AnomalyAgent", "DecisionAgent", "ForecastingAgent", "DataPrepAgent", "StatsAgent", "SQLAgent", "QualityAgent", "PPTXAgent", "ComparisonAgent", "WhatIfAgent", "DebateAgent"]
+__all__ = ["Orchestrator", "DataWrangler", "Analyst", "VizBuilder", "ReportWriter", "EmailAgent", "AnomalyAgent", "DecisionAgent", "ForecastingAgent", "DataPrepAgent", "StatsAgent", "SQLAgent", "QualityAgent", "PPTXAgent", "ComparisonAgent", "WhatIfAgent", "DebateAgent", "BlindSpotAgent"]

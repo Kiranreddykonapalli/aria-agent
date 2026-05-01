@@ -42,6 +42,7 @@ from agents.quality_agent import QualityAgent
 from agents.pptx_agent import PPTXAgent
 from agents.whatif_agent import WhatIfAgent
 from agents.debate_agent import DebateAgent
+from agents.blindspot_agent import BlindSpotAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -547,7 +548,8 @@ for key, default in [
     ("results", None), ("error", None), ("prep", None),
     ("sql", None), ("pptx_path", None),
     ("chat_history", []), ("pending_chat", None),
-    ("whatif", None), ("debate", None),
+    ("whatif", None), ("debate", None), ("blindspots", None),
+    ("question_area", ""), ("auto_run_question", False),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -574,6 +576,7 @@ with st.sidebar:
         "Your question  *(optional)*",
         placeholder="e.g. Which regions have the highest risk factors?\nLeave blank for automatic discovery.",
         height=110,
+        key="question_area",
     )
     model_label = st.selectbox("Model", list(MODELS.keys()))
     model_id    = MODELS[model_label]
@@ -620,6 +623,54 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
 
+
+# ── Auto-run trigger (from "Ask This →" blind spot buttons) ──────────
+if st.session_state.auto_run_question:
+    st.session_state.auto_run_question = False
+    _q = st.session_state.get("question_area", "").strip()
+    if _q and (uploaded_file or st.session_state.get("prep")):
+        if st.session_state.prep and st.session_state.prep.get("output_path"):
+            _dp = st.session_state.prep["output_path"]
+        elif uploaded_file:
+            import tempfile as _tmp
+            _f = _tmp.NamedTemporaryFile(delete=False, suffix=".csv", mode="wb")
+            _f.write(uploaded_file.getbuffer()); _f.close()
+            _dp = _f.name
+        else:
+            _dp = None
+        if _dp:
+            def _run_auto():
+                from agents.data_wrangler import DataWrangler as _DW
+                from agents.analyst import Analyst as _An
+                from agents.anomaly_agent import AnomalyAgent as _AnoA
+                from agents.decision_agent import DecisionAgent as _DecA
+                from agents.forecasting_agent import ForecastingAgent as _FoA
+                from agents.stats_agent import StatsAgent as _StA
+                from agents.viz_builder import VizBuilder as _VB
+                from agents.report_writer import ReportWriter as _RW
+                from agents.quality_agent import QualityAgent as _QA
+                import pandas as _pd2
+                raw_df = _pd2.read_csv(_dp)
+                qo  = _QA(model=model_id).run(raw_df)
+                wo  = _DW().run(_dp)
+                ao  = _An(model=model_id).run(wo, question=_q)
+                ano = _AnoA(model=model_id).run(wo["dataframe"], ao)
+                do  = _DecA(model=model_id).run(_q, ao, ano, wo["dataframe"])
+                fo  = _FoA(model=model_id).run(wo["dataframe"], ao)
+                so  = _StA(model=model_id).run(wo["dataframe"], ao, _q)
+                vzo = _VB().run(wo, ao)
+                ro  = _RW(model=model_id).run(_q, ao, vzo)
+                st.session_state.results = dict(
+                    quality=qo, wrangler=wo, analyst=ao, anomaly=ano,
+                    decision=do, forecast=fo, stats=so, viz=vzo, report=ro, question=_q,
+                )
+            with st.spinner(f"Re-running analysis: {_q[:60]}…"):
+                try:
+                    _run_auto()
+                    st.session_state.blindspots = None
+                except Exception as _e:
+                    st.error(f"Auto-run failed: {_e}")
+            st.rerun()
 
 # ── Pipeline runner ───────────────────────────────────────────────────
 def run_pipeline(data_path: str, question: str, model: str) -> None:
@@ -1816,3 +1867,82 @@ if st.session_state.results:
               </div>
             </div>
             """, unsafe_allow_html=True)
+
+# ── Blind Spots ───────────────────────────────────────────────────────
+if st.session_state.results:
+    with st.expander("🔍 Blind Spots — what this analysis missed", expanded=False):
+        st.caption(
+            "Aria audits its own analysis to find gaps — unexplored columns, "
+            "ignored segments, and unanswered questions."
+        )
+
+        bs_col1, bs_col2 = st.columns([3, 1])
+        detect_btn  = bs_col1.button(
+            "🔍 Detect Blind Spots", type="primary", use_container_width=True
+        )
+        clear_bs = bs_col2.button("✕ Clear", use_container_width=True, key="bs_clear")
+
+        if clear_bs:
+            st.session_state.blindspots = None
+            st.rerun()
+
+        if detect_btn:
+            r = st.session_state.results
+            with st.spinner("Auditing the analysis for gaps…"):
+                try:
+                    st.session_state.blindspots = BlindSpotAgent(model=model_id).run(
+                        dataframe      = r["wrangler"]["dataframe"],
+                        analyst_output = r["analyst"],
+                        question       = r["question"],
+                    )
+                except Exception as exc:
+                    st.error(f"Blind spot detection failed: {exc}")
+
+        if st.session_state.blindspots:
+            bs_result = st.session_state.blindspots
+            spots     = bs_result.get("blind_spots", [])
+            summary   = bs_result.get("summary", "")
+
+            if summary:
+                st.markdown(f"**Overview:** {summary}")
+                st.divider()
+
+            SEV_STYLE = {
+                "Critical":  ("#fee2e2", "#991b1b", "🔴"),
+                "Important": ("#fff7ed", "#9a3412", "🟠"),
+                "Minor":     ("#f0f4ff", "#1e40af", "🔵"),
+            }
+
+            for spot in spots:
+                sev          = spot.get("severity", "Minor")
+                bg, fg, icon = SEV_STYLE.get(sev, SEV_STYLE["Minor"])
+                title        = spot.get("title", "")
+                why          = spot.get("why_it_matters", "")
+                sug_q        = spot.get("suggested_question", "")
+
+                st.markdown(f"""
+                <div style="background:{bg};border-left:4px solid {fg};border-radius:10px;
+                            padding:1rem 1.2rem;margin-bottom:0.8rem;">
+                  <div style="font-size:0.7rem;font-weight:800;letter-spacing:0.07em;
+                              text-transform:uppercase;color:{fg};margin-bottom:0.4rem;">
+                    {icon} {sev}
+                  </div>
+                  <div style="font-size:0.95rem;font-weight:700;color:#111827;
+                              margin-bottom:0.35rem;">{title}</div>
+                  <div style="font-size:0.85rem;color:#374151;line-height:1.65;
+                              margin-bottom:0.5rem;">{why}</div>
+                  <div style="font-size:0.8rem;color:#6b7280;">
+                    <strong>Suggested question:</strong> {sug_q}
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if sug_q and st.button(
+                    f"Ask This → {sug_q[:55]}{'…' if len(sug_q) > 55 else ''}",
+                    key=f"ask_{title[:20]}",
+                    use_container_width=True,
+                ):
+                    st.session_state.question_area      = sug_q
+                    st.session_state.auto_run_question  = True
+                    st.session_state.blindspots         = None
+                    st.rerun()
