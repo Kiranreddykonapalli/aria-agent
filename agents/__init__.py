@@ -6,5 +6,6 @@ from .report_writer import ReportWriter
 from .email_agent import EmailAgent
 from .anomaly_agent import AnomalyAgent
 from .decision_agent import DecisionAgent
+from .forecasting_agent import ForecastingAgent
 
-__all__ = ["Orchestrator", "DataWrangler", "Analyst", "VizBuilder", "ReportWriter", "EmailAgent", "AnomalyAgent", "DecisionAgent"]
+__all__ = ["Orchestrator", "DataWrangler", "Analyst", "VizBuilder", "ReportWriter", "EmailAgent", "AnomalyAgent", "DecisionAgent", "ForecastingAgent"]
