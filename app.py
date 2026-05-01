@@ -38,6 +38,7 @@ from agents.forecasting_agent import ForecastingAgent
 from agents.data_prep_agent import DataPrepAgent
 from agents.stats_agent import StatsAgent
 from agents.sql_agent import SQLAgent
+from agents.quality_agent import QualityAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -449,6 +450,52 @@ button[kind="primary"]:hover {
     color: #1a56db;
 }
 
+/* ── Quality score card ──────────────────────────────────── */
+.score-card {
+    background: linear-gradient(135deg, #f0f4ff 0%, #ffffff 100%);
+    border: 1px solid #c7d7f8;
+    border-radius: 16px;
+    padding: 1.6rem 2rem;
+    margin-bottom: 1.4rem;
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+    flex-wrap: wrap;
+}
+.score-number {
+    font-size: 3.5rem;
+    font-weight: 900;
+    line-height: 1;
+    color: #111827;
+    flex-shrink: 0;
+}
+.score-grade {
+    font-size: 2rem;
+    font-weight: 900;
+    width: 2.6rem;
+    height: 2.6rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: #ffffff;
+}
+.score-body { flex: 1; min-width: 220px; }
+.score-label {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: #6b7280;
+    margin-bottom: 0.3rem;
+}
+.score-verdict {
+    font-size: 0.9rem;
+    color: #374151;
+    line-height: 1.65;
+}
+
 /* ── Caption ─────────────────────────────────────────────── */
 [data-testid="stCaptionContainer"] { color: #9ca3af; }
 </style>
@@ -537,6 +584,15 @@ def run_pipeline(data_path: str, question: str, model: str) -> None:
 
     with st.status("Running Aria pipeline…", expanded=True) as status:
         try:
+            st.write("🏅 **Quality Agent** — scoring raw data quality…")
+            import pandas as _pd
+            _raw_df = _pd.read_csv(data_path)
+            quality_output = QualityAgent(model=model).run(_raw_df)
+            st.write(
+                f"✓ Aria Score {quality_output['overall_score']:.0f}/100 · "
+                f"Grade {quality_output['grade']}"
+            )
+
             st.write("🔍 **Data Wrangler** — loading and cleaning CSV…")
             wrangler_output = DataWrangler().run(data_path)
             qr = wrangler_output["data_quality_report"]
@@ -614,6 +670,7 @@ def run_pipeline(data_path: str, question: str, model: str) -> None:
             return
 
     st.session_state.results = {
+        "quality":   quality_output,
         "wrangler":  wrangler_output,
         "analyst":   analyst_output,
         "anomaly":   anomaly_output,
@@ -880,6 +937,7 @@ if not st.session_state.results:
 
 # ── Results tabs ──────────────────────────────────────────────────────
 r        = st.session_state.results
+quality  = r.get("quality", {})
 wrangler = r["wrangler"]
 analyst  = r["analyst"]
 anomaly  = r["anomaly"]
@@ -891,6 +949,48 @@ report   = r["report"]
 question = r["question"]
 
 st.markdown(f"#### Results — *{question}*")
+
+# ── Quality score card ────────────────────────────────────────────────
+if quality:
+    GRADE_COLOR = {"A": "#059669", "B": "#1a56db", "C": "#d97706", "D": "#ea580c", "F": "#dc2626"}
+    q_score  = quality.get("overall_score", 0)
+    q_grade  = quality.get("grade", "?")
+    q_dims   = quality.get("dimension_scores", {})
+    q_verdict = quality.get("verdict", "")
+    q_recs   = quality.get("recommendations", [])
+    g_color  = GRADE_COLOR.get(q_grade, "#6b7280")
+    score_pct = int(q_score)
+
+    st.markdown(f"""
+    <div class="score-card">
+      <div class="score-number">{score_pct}<span style="font-size:1.4rem;color:#9ca3af;">/100</span></div>
+      <div class="score-grade" style="background:{g_color};">{q_grade}</div>
+      <div class="score-body">
+        <div class="score-label">Aria Data Quality Score</div>
+        <div class="score-verdict">{q_verdict}</div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Dimension bars
+    DIM_MAX = {"completeness": 20, "uniqueness": 20, "consistency": 20,
+               "validity": 20, "timeliness": 10, "uniformity": 10}
+    dim_cols = st.columns(3)
+    for i, (dim, max_pts) in enumerate(DIM_MAX.items()):
+        score_val = q_dims.get(dim, 0)
+        pct       = score_val / max_pts
+        label     = f"{dim.title()} — {score_val:.0f}/{max_pts}"
+        with dim_cols[i % 3]:
+            st.caption(label)
+            st.progress(pct)
+
+    if q_recs:
+        with st.expander("💡 Recommendations to improve your score"):
+            for i, rec in enumerate(q_recs, 1):
+                st.markdown(f"**{i}.** {rec}")
+
+    st.divider()
+
 tab_insights, tab_charts, tab_anomalies, tab_decisions, tab_forecasts, tab_stats, tab_report = st.tabs(
     ["💡  Insights", "📊  Charts", "🔎  Anomalies", "🎯  Decisions", "📈  Forecasts", "🔬  Statistics", "📄  Report"]
 )

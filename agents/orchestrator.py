@@ -19,6 +19,7 @@ from __future__ import annotations
 import sys
 import traceback
 
+from .quality_agent import QualityAgent
 from .data_wrangler import DataWrangler
 from .analyst import Analyst
 from .anomaly_agent import AnomalyAgent
@@ -40,6 +41,7 @@ def _status(msg: str) -> None:
 class Orchestrator:
     def __init__(self, model: str = "claude-sonnet-4-6"):
         self.model = model
+        self.quality_agent    = QualityAgent(model=model)
         self.data_wrangler    = DataWrangler()
         self.analyst          = Analyst(model=model)
         self.anomaly_agent    = AnomalyAgent(model=model)
@@ -87,8 +89,33 @@ class Orchestrator:
             "stats_significant":   [],
             "stats_narrative":     "",
             "stats_recommendations": [],
+            "quality_score":       0.0,
+            "quality_grade":       "",
+            "quality_dimensions":  {},
+            "quality_verdict":     "",
+            "quality_recommendations": [],
             "error":               None,
         }
+
+        # ── Stage 0: Quality Agent ───────────────────────────────────
+        _status("\n" + _DIV)
+        _status("  Quality Agent  —  scoring raw data quality")
+        _status(_DIV)
+        try:
+            import pandas as _pd
+            raw_df       = _pd.read_csv(data_path)
+            quality_output = self.quality_agent.run(raw_df, wrangler_output=None)
+            result["quality_score"]        = quality_output["overall_score"]
+            result["quality_grade"]        = quality_output["grade"]
+            result["quality_dimensions"]   = quality_output["dimension_scores"]
+            result["quality_verdict"]      = quality_output["verdict"]
+            result["quality_recommendations"] = quality_output["recommendations"]
+            _status(
+                f"  OK  Aria Score {quality_output['overall_score']:.0f}/100 "
+                f"(Grade {quality_output['grade']})"
+            )
+        except Exception:
+            return self._fail(result, "Quality Agent", traceback.format_exc())
 
         # ── Stage 1: Data Wrangler ────────────────────────────────────
         _status("\n" + _DIV)
