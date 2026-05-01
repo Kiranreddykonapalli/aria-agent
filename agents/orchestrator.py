@@ -23,6 +23,7 @@ from .data_wrangler import DataWrangler
 from .analyst import Analyst
 from .anomaly_agent import AnomalyAgent
 from .decision_agent import DecisionAgent
+from .forecasting_agent import ForecastingAgent
 from .viz_builder import VizBuilder
 from .report_writer import ReportWriter
 
@@ -38,12 +39,13 @@ def _status(msg: str) -> None:
 class Orchestrator:
     def __init__(self, model: str = "claude-sonnet-4-6"):
         self.model = model
-        self.data_wrangler   = DataWrangler()
-        self.analyst         = Analyst(model=model)
-        self.anomaly_agent   = AnomalyAgent(model=model)
-        self.decision_agent  = DecisionAgent(model=model)
-        self.viz_builder     = VizBuilder()
-        self.report_writer   = ReportWriter(model=model)
+        self.data_wrangler    = DataWrangler()
+        self.analyst          = Analyst(model=model)
+        self.anomaly_agent    = AnomalyAgent(model=model)
+        self.decision_agent   = DecisionAgent(model=model)
+        self.forecasting_agent = ForecastingAgent(model=model)
+        self.viz_builder      = VizBuilder()
+        self.report_writer    = ReportWriter(model=model)
 
     def run(self, data_path: str, question: str) -> dict:
         """
@@ -76,6 +78,9 @@ class Orchestrator:
             "decisions":           [],
             "decision_summary":    "",
             "decision_domain":     "",
+            "forecasts":           [],
+            "forecast_narrative":  "",
+            "forecast_figures":    [],
             "error":               None,
         }
 
@@ -147,7 +152,25 @@ class Orchestrator:
         except Exception:
             return self._fail(result, "Decision Agent", traceback.format_exc())
 
-        # ── Stage 5: Viz Builder ─────────────────────────────────────
+        # ── Stage 5: Forecasting Agent ───────────────────────────────
+        _status("\n" + _DIV)
+        _status("  Forecasting Agent  —  fitting trends and projecting forward")
+        _status(_DIV)
+        try:
+            forecast_output = self.forecasting_agent.run(
+                wrangler_output["dataframe"], analyst_output
+            )
+            result["forecasts"]          = forecast_output["forecasts"]
+            result["forecast_narrative"] = forecast_output["narrative"]
+            result["forecast_figures"]   = forecast_output["figure_paths"]
+            _status(
+                f"  OK  {len(forecast_output['forecasts'])} forecasts · "
+                f"{len(forecast_output['figure_paths'])} charts"
+            )
+        except Exception:
+            return self._fail(result, "Forecasting Agent", traceback.format_exc())
+
+        # ── Stage 6: Viz Builder ─────────────────────────────────────
         _status("\n" + _DIV)
         _status("  Viz Builder  —  rendering charts")
         _status(_DIV)
@@ -164,7 +187,7 @@ class Orchestrator:
         except Exception:
             return self._fail(result, "Viz Builder", traceback.format_exc())
 
-        # ── Stage 6: Report Writer ───────────────────────────────────
+        # ── Stage 7: Report Writer ───────────────────────────────────
         _status("\n" + _DIV)
         _status("  Report Writer  —  composing final report")
         _status(_DIV)

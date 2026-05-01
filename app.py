@@ -34,6 +34,7 @@ from agents.report_writer import ReportWriter
 from agents.email_agent import EmailAgent
 from agents.anomaly_agent import AnomalyAgent
 from agents.decision_agent import DecisionAgent
+from agents.forecasting_agent import ForecastingAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -323,6 +324,47 @@ button[kind="primary"]:hover {
     margin-bottom: 1.2rem;
 }
 
+/* ── Forecast cards ──────────────────────────────────────── */
+.forecast-card {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 1rem 1.2rem 0.8rem;
+    margin-bottom: 1rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.forecast-metric {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #111827;
+    margin-bottom: 0.5rem;
+}
+.forecast-row {
+    display: flex;
+    gap: 1.2rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.4rem;
+    align-items: center;
+}
+.r2-badge {
+    padding: 0.2rem 0.65rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+.forecast-vals {
+    font-size: 0.82rem;
+    color: #374151;
+    line-height: 1.7;
+}
+.forecast-vals strong { color: #111827; }
+.ci-note {
+    font-size: 0.75rem;
+    color: #9ca3af;
+    margin-top: 0.2rem;
+}
+
 /* ── Caption ─────────────────────────────────────────────── */
 [data-testid="stCaptionContainer"] { color: #9ca3af; }
 </style>
@@ -449,7 +491,16 @@ def run_pipeline(data_path: str, question: str, model: str) -> None:
                 f"domain: {decision_output['domain'][:70]}"
             )
 
-            st.write("📈 **Viz Builder** — rendering charts…")
+            st.write("📈 **Forecasting Agent** — fitting trends and projecting forward…")
+            forecast_output = ForecastingAgent(model=model).run(
+                wrangler_output["dataframe"], analyst_output
+            )
+            st.write(
+                f"✓ {len(forecast_output['forecasts'])} forecasts · "
+                f"{len(forecast_output['figure_paths'])} charts"
+            )
+
+            st.write("📊 **Viz Builder** — rendering analysis charts…")
             viz_output = VizBuilder().run(wrangler_output, analyst_output)
             st.write(
                 f"✓ {viz_output['charts_rendered']} charts saved · "
@@ -474,6 +525,7 @@ def run_pipeline(data_path: str, question: str, model: str) -> None:
         "analyst":   analyst_output,
         "anomaly":   anomaly_output,
         "decision":  decision_output,
+        "forecast":  forecast_output,
         "viz":       viz_output,
         "report":    report_output,
         "question":  question,
@@ -564,13 +616,14 @@ wrangler = r["wrangler"]
 analyst  = r["analyst"]
 anomaly  = r["anomaly"]
 decision = r["decision"]
+forecast = r["forecast"]
 viz      = r["viz"]
 report   = r["report"]
 question = r["question"]
 
 st.markdown(f"#### Results — *{question}*")
-tab_insights, tab_charts, tab_anomalies, tab_decisions, tab_report = st.tabs(
-    ["💡  Insights", "📊  Charts", "🔎  Anomalies", "🎯  Decisions", "📄  Report"]
+tab_insights, tab_charts, tab_anomalies, tab_decisions, tab_forecasts, tab_report = st.tabs(
+    ["💡  Insights", "📊  Charts", "🔎  Anomalies", "🎯  Decisions", "📈  Forecasts", "📄  Report"]
 )
 
 # ── Tab 1: Insights ───────────────────────────────────────────────────
@@ -764,7 +817,118 @@ with tab_decisions:
         st.subheader("Decision Summary")
         st.markdown(decision["summary"])
 
-# ── Tab 5: Report ─────────────────────────────────────────────────────
+# ── Tab 5: Forecasts ─────────────────────────────────────────────────
+with tab_forecasts:
+    fc_list    = forecast.get("forecasts", [])
+    fc_narr    = forecast.get("narrative", "")
+    fc_figures = forecast.get("figure_paths", [])
+
+    # Build a path → forecast lookup so we can show chart under its card
+    # forecast_figures are named  …_forecast_<col>.png  — match by position
+    fig_by_metric: dict[str, str] = {}
+    for fc in fc_list:
+        metric = fc["metric"]
+        for p in fc_figures:
+            if metric.lower().replace(" ", "_") in Path(p).stem.lower():
+                fig_by_metric[metric] = p
+                break
+
+    # Narrative at the top
+    if fc_narr:
+        st.subheader("Trend Interpretation")
+        for line in fc_narr.split("\n"):
+            if line.strip():
+                st.markdown(line)
+        st.divider()
+
+    if not fc_list:
+        st.info(
+            "No statistically meaningful trends found. "
+            "Forecasting requires a time column and at least 4 data points per metric."
+        )
+    else:
+        st.caption(
+            f"{len(fc_list)} forecast(s) · sorted by model fit (R²) · "
+            "dashed lines show 95% prediction interval"
+        )
+
+        for fc in fc_list:
+            metric    = fc["metric"]
+            r2        = fc.get("r_squared", 0)
+            last_val  = fc.get("last_value")
+            last_per  = fc.get("last_period")
+            slope     = fc.get("slope", 0)
+
+            # R² colour
+            if r2 >= 0.70:
+                r2_bg, r2_fg, r2_label = "#dcfce7", "#166534", "Strong fit"
+            elif r2 >= 0.40:
+                r2_bg, r2_fg, r2_label = "#fef9c3", "#854d0e", "Moderate fit"
+            else:
+                r2_bg, r2_fg, r2_label = "#fee2e2", "#991b1b", "Weak fit"
+
+            # Collect forecast years
+            future_keys = sorted(
+                [k for k in fc if k.startswith("forecast_")],
+                key=lambda k: int(k.split("_")[1]),
+            )
+            future_years = [int(k.split("_")[1]) for k in future_keys]
+
+            # Projected values and CI for each year
+            proj_lines = []
+            for yr in future_years:
+                val = fc.get(f"forecast_{yr}")
+                ci  = fc.get(f"ci_{yr}")
+                if val is None:
+                    continue
+                ci_str = (
+                    f"[{ci[0]:.4g} – {ci[1]:.4g}]"
+                    if ci else ""
+                )
+                pct_chg = ((val - last_val) / abs(last_val) * 100) if last_val else 0
+                arrow   = "▲" if val > last_val else "▼"
+                proj_lines.append(
+                    f"<strong>{yr}:</strong> {val:.4g} "
+                    f"<span style='color:{'#166534' if val>last_val else '#991b1b'}'>"
+                    f"{arrow} {abs(pct_chg):.1f}%</span> &nbsp; "
+                    f"<span style='color:#9ca3af;font-size:0.75rem;'>{ci_str}</span>"
+                )
+
+            proj_html = "<br>".join(proj_lines)
+            trend_dir = "increasing" if slope > 0 else "decreasing"
+
+            st.markdown(f"""
+            <div class="forecast-card">
+              <div class="forecast-metric">{metric.replace('_', ' ').title()}</div>
+              <div class="forecast-row">
+                <span class="r2-badge" style="background:{r2_bg};color:{r2_fg};">
+                  R² = {r2:.2f} &nbsp;·&nbsp; {r2_label}
+                </span>
+                <span style="font-size:0.78rem;color:#6b7280;">
+                  Trend: {trend_dir} · Last observed: {last_val:.4g} ({last_per})
+                </span>
+              </div>
+              <div class="forecast-vals">{proj_html}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Show chart if available
+            chart_path = fig_by_metric.get(metric)
+            if not chart_path:
+                # Fallback: match by index order
+                idx = fc_list.index(fc)
+                chart_path = fc_figures[idx] if idx < len(fc_figures) else None
+
+            if chart_path and os.path.exists(chart_path):
+                st.image(chart_path, use_container_width=True)
+
+        # Any leftover charts not matched to a card
+        unmatched = [p for p in fc_figures if p not in fig_by_metric.values()]
+        for p in unmatched:
+            if os.path.exists(p):
+                st.image(p, use_container_width=True)
+
+# ── Tab 6: Report ─────────────────────────────────────────────────────
 with tab_report:
     st.markdown(report["report_text"])
     st.divider()
