@@ -51,7 +51,15 @@ class Orchestrator:
         self.viz_builder       = VizBuilder()
         self.report_writer    = ReportWriter(model=model)
 
-    def run(self, data_path: str, question: str) -> dict:
+    #: Fallback question used when the user provides none.
+    DEFAULT_QUESTION = (
+        "Perform a comprehensive exploratory analysis of this dataset. "
+        "Identify the most interesting patterns, trends, outliers, and relationships. "
+        "What are the most important findings a business leader should know?"
+    )
+
+    def run(self, data_path: str, question: str = "") -> dict:
+        question = question.strip() or self.DEFAULT_QUESTION
         """
         Execute the full pipeline for a user question against a CSV file.
 

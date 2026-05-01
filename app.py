@@ -526,8 +526,8 @@ with st.sidebar:
         help="Any tabular CSV — column names are auto-detected by Claude.",
     )
     question_input = st.text_area(
-        "Your question",
-        placeholder="e.g. Which regions have the highest risk factors?",
+        "Your question  *(optional)*",
+        placeholder="e.g. Which regions have the highest risk factors?\nLeave blank for automatic discovery.",
         height=110,
     )
     model_label = st.selectbox("Model", list(MODELS.keys()))
@@ -585,6 +585,12 @@ def run_pipeline(data_path: str, question: str, model: str) -> None:
 
     with st.status("Running Aria pipeline…", expanded=True) as status:
         try:
+            if not question.strip():
+                st.info(
+                    "No question entered — Aria will automatically discover "
+                    "the most interesting insights in your data."
+                )
+
             st.write("🏅 **Quality Agent** — scoring raw data quality…")
             import pandas as _pd
             _raw_df = _pd.read_csv(data_path)
@@ -695,11 +701,9 @@ if demo_btn:
         run_pipeline(DEMO_CSV, DEMO_QUESTION, model_id)
 
 if run_btn:
-    q = question_input.strip()
+    q = question_input.strip()   # empty string → orchestrator uses default
     if not uploaded_file and not st.session_state.prep:
         st.sidebar.error("Upload a CSV file — or use the Demo button.")
-    elif not q:
-        st.sidebar.error("Enter a question before running.")
     else:
         # Prefer the prep-cleaned CSV if one exists; otherwise use the upload
         if st.session_state.prep and st.session_state.prep.get("output_path"):
