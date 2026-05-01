@@ -41,6 +41,7 @@ from agents.sql_agent import SQLAgent
 from agents.quality_agent import QualityAgent
 from agents.pptx_agent import PPTXAgent
 from agents.whatif_agent import WhatIfAgent
+from agents.debate_agent import DebateAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -507,6 +508,35 @@ button[kind="primary"]:hover {
 }
 .suggest-btn-row { margin-bottom: 0.8rem; }
 
+/* ── Debate cards ────────────────────────────────────────── */
+.debate-opt {
+    background: #eff6ff; border-left: 4px solid #1a56db;
+    border-radius: 10px; padding: 1rem 1.1rem; height: 100%;
+}
+.debate-crit {
+    background: #fff1f2; border-right: 4px solid #dc2626;
+    border-radius: 10px; padding: 1rem 1.1rem; height: 100%;
+    text-align: right;
+}
+.debate-label {
+    font-size: 0.7rem; font-weight: 800; letter-spacing: 0.08em;
+    text-transform: uppercase; margin-bottom: 0.5rem;
+}
+.debate-text { font-size: 0.88rem; color: #111827; line-height: 1.65; }
+.debate-judge {
+    background: #faf5ff; border: 2px solid #7c3aed;
+    border-radius: 12px; padding: 1.2rem 1.4rem; text-align: center;
+    margin-top: 1rem;
+}
+.debate-judge-label {
+    font-size: 0.75rem; font-weight: 800; letter-spacing: 0.08em;
+    text-transform: uppercase; color: #7c3aed; margin-bottom: 0.6rem;
+}
+.winner-badge {
+    display: inline-block; padding: 0.2rem 0.8rem; border-radius: 999px;
+    font-size: 0.75rem; font-weight: 700; margin-top: 0.5rem;
+}
+
 /* ── Caption ─────────────────────────────────────────────── */
 [data-testid="stCaptionContainer"] { color: #9ca3af; }
 </style>
@@ -517,7 +547,7 @@ for key, default in [
     ("results", None), ("error", None), ("prep", None),
     ("sql", None), ("pptx_path", None),
     ("chat_history", []), ("pending_chat", None),
-    ("whatif", None),
+    ("whatif", None), ("debate", None),
 ]:
     if key not in st.session_state:
         st.session_state[key] = default
@@ -1702,3 +1732,87 @@ if st.session_state.results:
                 fig_path = wi.get("figure_path")
                 if fig_path and os.path.exists(fig_path):
                     st.image(fig_path, use_container_width=True)
+
+# ── Agent Debate ──────────────────────────────────────────────────────
+if st.session_state.results:
+    with st.expander("⚔️ Agent Debate — Optimist vs Critic", expanded=False):
+        st.caption(
+            "Two AI analysts debate the same data from opposite perspectives. "
+            "Aria Judge delivers the final balanced verdict."
+        )
+
+        db_col1, db_col2 = st.columns([3, 1])
+        start_debate = db_col1.button(
+            "⚔️ Start Debate", type="primary", use_container_width=True
+        )
+        clear_debate = db_col2.button(
+            "✕ Clear", use_container_width=True, key="debate_clear"
+        )
+
+        if clear_debate:
+            st.session_state.debate = None
+            st.rerun()
+
+        if start_debate:
+            r = st.session_state.results
+            with st.spinner("Agents are debating… (5 Claude calls)"):
+                try:
+                    st.session_state.debate = DebateAgent(model=model_id).run(
+                        analyst_output  = r["analyst"],
+                        anomaly_output  = r["anomaly"],
+                        decision_output = r["decision"],
+                        question        = r["question"],
+                    )
+                except Exception as exc:
+                    st.error(f"Debate failed: {exc}")
+
+        if st.session_state.debate:
+            db = st.session_state.debate
+
+            def _debate_card(text: str, role: str, rnd: int) -> str:
+                if role == "opt":
+                    return (
+                        f'<div class="debate-opt">'
+                        f'<div class="debate-label" style="color:#1a56db;">🔵 Agent A — Optimist &nbsp; Round {rnd}</div>'
+                        f'<div class="debate-text">{text}</div></div>'
+                    )
+                return (
+                    f'<div class="debate-crit">'
+                    f'<div class="debate-label" style="color:#dc2626;">Round {rnd} &nbsp; Critic — Agent B 🔴</div>'
+                    f'<div class="debate-text">{text}</div></div>'
+                )
+
+            for rnd, (opt_key, crit_key) in enumerate(
+                [("round1_optimist", "round1_critic"), ("round2_optimist", "round2_critic")], 1
+            ):
+                st.markdown(f"**— Round {rnd} —**")
+                col_a, col_b = st.columns(2, gap="medium")
+                with col_a:
+                    st.markdown(_debate_card(db[opt_key], "opt", rnd), unsafe_allow_html=True)
+                with col_b:
+                    st.markdown(_debate_card(db[crit_key], "crit", rnd), unsafe_allow_html=True)
+
+            # Judge verdict
+            winner     = db.get("winner", "balanced")
+            verdict    = db.get("judge_verdict", "")
+            key_insight = db.get("key_insight", "")
+
+            WINNER_STYLE = {
+                "optimist": ("#dcfce7", "#166534", "🔵 Optimist wins"),
+                "critic":   ("#fee2e2", "#991b1b", "🔴 Critic wins"),
+                "balanced": ("#faf5ff", "#7c3aed", "⚖️ Balanced — no clear winner"),
+            }
+            wb, wf, wl = WINNER_STYLE.get(winner, WINNER_STYLE["balanced"])
+
+            st.markdown(f"""
+            <div class="debate-judge">
+              <div class="debate-judge-label">⚖️ Aria Judge — Final Verdict</div>
+              <div style="font-size:0.92rem;color:#111827;line-height:1.7;margin-bottom:0.7rem;">
+                {verdict}
+              </div>
+              <span class="winner-badge" style="background:{wb};color:{wf};">{wl}</span>
+              <div style="margin-top:0.8rem;font-size:0.82rem;color:#374151;">
+                <strong>Key Insight:</strong> {key_insight}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
