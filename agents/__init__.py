@@ -8,5 +8,6 @@ from .anomaly_agent import AnomalyAgent
 from .decision_agent import DecisionAgent
 from .forecasting_agent import ForecastingAgent
 from .data_prep_agent import DataPrepAgent
+from .stats_agent import StatsAgent
 
-__all__ = ["Orchestrator", "DataWrangler", "Analyst", "VizBuilder", "ReportWriter", "EmailAgent", "AnomalyAgent", "DecisionAgent", "ForecastingAgent", "DataPrepAgent"]
+__all__ = ["Orchestrator", "DataWrangler", "Analyst", "VizBuilder", "ReportWriter", "EmailAgent", "AnomalyAgent", "DecisionAgent", "ForecastingAgent", "DataPrepAgent", "StatsAgent"]

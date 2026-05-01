@@ -24,6 +24,7 @@ from .analyst import Analyst
 from .anomaly_agent import AnomalyAgent
 from .decision_agent import DecisionAgent
 from .forecasting_agent import ForecastingAgent
+from .stats_agent import StatsAgent
 from .viz_builder import VizBuilder
 from .report_writer import ReportWriter
 
@@ -44,7 +45,8 @@ class Orchestrator:
         self.anomaly_agent    = AnomalyAgent(model=model)
         self.decision_agent   = DecisionAgent(model=model)
         self.forecasting_agent = ForecastingAgent(model=model)
-        self.viz_builder      = VizBuilder()
+        self.stats_agent       = StatsAgent(model=model)
+        self.viz_builder       = VizBuilder()
         self.report_writer    = ReportWriter(model=model)
 
     def run(self, data_path: str, question: str) -> dict:
@@ -81,6 +83,10 @@ class Orchestrator:
             "forecasts":           [],
             "forecast_narrative":  "",
             "forecast_figures":    [],
+            "stats_tests":         [],
+            "stats_significant":   [],
+            "stats_narrative":     "",
+            "stats_recommendations": [],
             "error":               None,
         }
 
@@ -170,7 +176,26 @@ class Orchestrator:
         except Exception:
             return self._fail(result, "Forecasting Agent", traceback.format_exc())
 
-        # ── Stage 6: Viz Builder ─────────────────────────────────────
+        # ── Stage 6: Stats Agent ─────────────────────────────────────
+        _status("\n" + _DIV)
+        _status("  Stats Agent  —  running hypothesis tests")
+        _status(_DIV)
+        try:
+            stats_output = self.stats_agent.run(
+                wrangler_output["dataframe"], analyst_output, question
+            )
+            result["stats_tests"]           = stats_output["tests_run"]
+            result["stats_significant"]     = stats_output["significant_findings"]
+            result["stats_narrative"]       = stats_output["narrative"]
+            result["stats_recommendations"] = stats_output["recommendations"]
+            _status(
+                f"  OK  {len(stats_output['tests_run'])} tests — "
+                f"{len(stats_output['significant_findings'])} significant"
+            )
+        except Exception:
+            return self._fail(result, "Stats Agent", traceback.format_exc())
+
+        # ── Stage 7: Viz Builder ─────────────────────────────────────
         _status("\n" + _DIV)
         _status("  Viz Builder  —  rendering charts")
         _status(_DIV)
@@ -187,7 +212,7 @@ class Orchestrator:
         except Exception:
             return self._fail(result, "Viz Builder", traceback.format_exc())
 
-        # ── Stage 7: Report Writer ───────────────────────────────────
+        # ── Stage 8: Report Writer ───────────────────────────────────
         _status("\n" + _DIV)
         _status("  Report Writer  —  composing final report")
         _status(_DIV)

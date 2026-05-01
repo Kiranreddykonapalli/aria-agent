@@ -36,6 +36,7 @@ from agents.anomaly_agent import AnomalyAgent
 from agents.decision_agent import DecisionAgent
 from agents.forecasting_agent import ForecastingAgent
 from agents.data_prep_agent import DataPrepAgent
+from agents.stats_agent import StatsAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -389,6 +390,43 @@ button[kind="primary"]:hover {
     margin-bottom: 0.4rem;
 }
 
+/* ── Stats tab ───────────────────────────────────────────── */
+.stat-card {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 0.85rem 1.1rem;
+    margin-bottom: 0.6rem;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.8rem;
+}
+.stat-sig   { border-left: 4px solid #059669; }
+.stat-insig { border-left: 4px solid #d1d5db; }
+.stat-badge {
+    flex-shrink: 0;
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    margin-top: 0.15rem;
+}
+.stat-body { flex: 1; min-width: 0; }
+.stat-cols {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #111827;
+    margin-bottom: 0.2rem;
+}
+.stat-nums {
+    font-size: 0.78rem;
+    color: #6b7280;
+    line-height: 1.6;
+}
+.stat-nums strong { color: #374151; }
+
 /* ── Caption ─────────────────────────────────────────────── */
 [data-testid="stCaptionContainer"] { color: #9ca3af; }
 </style>
@@ -524,6 +562,15 @@ def run_pipeline(data_path: str, question: str, model: str) -> None:
                 f"{len(forecast_output['figure_paths'])} charts"
             )
 
+            st.write("🔬 **Stats Agent** — running hypothesis tests…")
+            stats_output = StatsAgent(model=model).run(
+                wrangler_output["dataframe"], analyst_output, question
+            )
+            st.write(
+                f"✓ {len(stats_output['tests_run'])} tests · "
+                f"{len(stats_output['significant_findings'])} significant"
+            )
+
             st.write("📊 **Viz Builder** — rendering analysis charts…")
             viz_output = VizBuilder().run(wrangler_output, analyst_output)
             st.write(
@@ -550,6 +597,7 @@ def run_pipeline(data_path: str, question: str, model: str) -> None:
         "anomaly":   anomaly_output,
         "decision":  decision_output,
         "forecast":  forecast_output,
+        "stats":     stats_output,
         "viz":       viz_output,
         "report":    report_output,
         "question":  question,
@@ -726,13 +774,14 @@ analyst  = r["analyst"]
 anomaly  = r["anomaly"]
 decision = r["decision"]
 forecast = r["forecast"]
+stats    = r["stats"]
 viz      = r["viz"]
 report   = r["report"]
 question = r["question"]
 
 st.markdown(f"#### Results — *{question}*")
-tab_insights, tab_charts, tab_anomalies, tab_decisions, tab_forecasts, tab_report = st.tabs(
-    ["💡  Insights", "📊  Charts", "🔎  Anomalies", "🎯  Decisions", "📈  Forecasts", "📄  Report"]
+tab_insights, tab_charts, tab_anomalies, tab_decisions, tab_forecasts, tab_stats, tab_report = st.tabs(
+    ["💡  Insights", "📊  Charts", "🔎  Anomalies", "🎯  Decisions", "📈  Forecasts", "🔬  Statistics", "📄  Report"]
 )
 
 # ── Tab 1: Insights ───────────────────────────────────────────────────
@@ -1037,7 +1086,106 @@ with tab_forecasts:
             if os.path.exists(p):
                 st.image(p, use_container_width=True)
 
-# ── Tab 6: Report ─────────────────────────────────────────────────────
+# ── Tab 6: Statistics ────────────────────────────────────────────────
+with tab_stats:
+    all_tests  = stats.get("tests_run", [])
+    sig_tests  = stats.get("significant_findings", [])
+    narr       = stats.get("narrative", "")
+    recs       = stats.get("recommendations", [])
+
+    # Summary bar
+    n_total = len(all_tests)
+    n_sig   = len(sig_tests)
+    n_insig = n_total - n_sig
+    types_run = list({t["test_name"] for t in all_tests})
+
+    col_a, col_b, col_c = st.columns(3)
+    col_a.metric("Tests run",      n_total)
+    col_b.metric("Significant",    n_sig)
+    col_c.metric("Not significant", n_insig)
+
+    if types_run:
+        st.caption("Tests performed: " + " · ".join(types_run))
+
+    # Narrative
+    if narr:
+        st.divider()
+        st.subheader("Statistical Interpretation")
+        for line in narr.split("\n"):
+            if line.strip():
+                st.markdown(line)
+
+    # Significant findings
+    if sig_tests:
+        st.divider()
+        st.subheader(f"✅ Significant Findings  ({n_sig})")
+
+        EFFECT_COLOR = {"large": "#166534", "medium": "#854d0e", "small": "#1e40af"}
+
+        for t in sig_tests:
+            cols_str  = " × ".join(t.get("columns_tested", []))
+            p_val     = t.get("p_value", 0)
+            effect    = t.get("effect_size", 0)
+            e_label   = t.get("effect_label", "")
+            e_color   = EFFECT_COLOR.get(e_label, "#374151")
+            direction = t.get("direction", "")
+            dir_str   = f" · {direction}" if direction else ""
+            stat_val  = t.get("statistic", "")
+
+            p_str = f"{p_val:.4f}" if p_val >= 0.0001 else "<0.0001"
+
+            st.markdown(f"""
+            <div class="stat-card stat-sig">
+              <div>
+                <span class="stat-badge" style="background:#dcfce7;color:#166534;">
+                  ✓ p={p_str}
+                </span>
+              </div>
+              <div class="stat-body">
+                <div class="stat-cols">{cols_str}</div>
+                <div class="stat-nums">
+                  <strong>{t.get('test_name','')}</strong>
+                  &nbsp;·&nbsp; statistic = {stat_val}
+                  &nbsp;·&nbsp;
+                  <span style="color:{e_color};font-weight:700;">
+                    {e_label} effect (r={effect}){dir_str}
+                  </span>
+                  &nbsp;·&nbsp; n = {t.get('n','')}
+                </div>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # Non-significant findings collapsed
+    insig_tests = [t for t in all_tests if not t["significant"]]
+    if insig_tests:
+        with st.expander(f"Non-significant results ({n_insig})", expanded=False):
+            for t in insig_tests:
+                cols_str = " × ".join(t.get("columns_tested", []))
+                p_val    = t.get("p_value", 0)
+                p_str    = f"{p_val:.4f}" if p_val >= 0.0001 else "<0.0001"
+                st.markdown(f"""
+                <div class="stat-card stat-insig">
+                  <div>
+                    <span class="stat-badge" style="background:#f3f4f6;color:#6b7280;">
+                      p={p_str}
+                    </span>
+                  </div>
+                  <div class="stat-body">
+                    <div class="stat-cols" style="color:#6b7280;">{cols_str}</div>
+                    <div class="stat-nums">{t.get('test_name','')} · effect={t.get('effect_size','')} ({t.get('effect_label','')})</div>
+                  </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    # Recommendations
+    if recs:
+        st.divider()
+        st.subheader("Recommendations")
+        for i, rec in enumerate(recs, 1):
+            st.markdown(f"**{i}.** {rec}")
+
+# ── Tab 7: Report ─────────────────────────────────────────────────────
 with tab_report:
     st.markdown(report["report_text"])
     st.divider()
