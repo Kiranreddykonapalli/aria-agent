@@ -31,6 +31,7 @@ from agents.data_wrangler import DataWrangler
 from agents.analyst import Analyst
 from agents.viz_builder import VizBuilder
 from agents.report_writer import ReportWriter
+from agents.email_agent import EmailAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -255,6 +256,34 @@ with st.sidebar:
 
     if st.session_state.results:
         st.success("Last run complete")
+
+    # ── Share Results ─────────────────────────────────────────────
+    if st.session_state.results:
+        st.divider()
+        st.subheader("📧 Share Results")
+        recipient = st.text_input(
+            "Recipient email",
+            placeholder="colleague@example.com",
+            key="email_recipient",
+        )
+        send_btn = st.button("Send Report via Email", use_container_width=True)
+
+        if send_btn:
+            if not recipient.strip():
+                st.error("Enter a recipient email address.")
+            else:
+                r = st.session_state.results
+                with st.spinner("Sending…"):
+                    outcome = EmailAgent().run(
+                        recipient_email=recipient.strip(),
+                        report_text=r["report"]["report_text"],
+                        figure_paths=r["viz"]["figure_paths"],
+                        question=r["question"],
+                    )
+                if outcome["success"]:
+                    st.success(f"Report sent to {outcome['recipient']}")
+                else:
+                    st.error(f"Failed: {outcome['message']}")
 
     # ── Footer ────────────────────────────────────────────────────
     st.markdown("""
