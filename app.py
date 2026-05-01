@@ -497,13 +497,26 @@ button[kind="primary"]:hover {
     line-height: 1.65;
 }
 
+/* ── Chat section ────────────────────────────────────────── */
+.chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.6rem;
+}
+.suggest-btn-row { margin-bottom: 0.8rem; }
+
 /* ── Caption ─────────────────────────────────────────────── */
 [data-testid="stCaptionContainer"] { color: #9ca3af; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Session state ─────────────────────────────────────────────────────
-for key, default in [("results", None), ("error", None), ("prep", None), ("sql", None), ("pptx_path", None)]:
+for key, default in [
+    ("results", None), ("error", None), ("prep", None),
+    ("sql", None), ("pptx_path", None),
+    ("chat_history", []), ("pending_chat", None),
+]:
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -1450,3 +1463,153 @@ with tab_report:
 
     with path_col:
         st.caption(f"Saved to `{report['report_path']}`")
+
+# ── Chat with Aria ────────────────────────────────────────────────────
+import anthropic as _anthropic
+
+CHAT_SYSTEM = """\
+You are Aria, an AI data analyst. You have just completed a full analysis of the user's dataset.
+Answer follow-up questions using only the analysis results provided in the context below.
+Be conversational but precise — always reference specific numbers, column names, or entities
+from the analysis. If asked about something outside this dataset or analysis, politely say
+you can only discuss this specific dataset and its findings.
+Do not repeat the full context back; answer the question directly and concisely."""
+
+SUGGESTIONS = [
+    "Which finding is most urgent?",
+    "Explain the key insights in simple terms",
+    "What should I do first?",
+]
+
+
+def _build_chat_context(r: dict) -> str:
+    """Compact structured summary of all analysis outputs for the chat system prompt."""
+    analyst  = r.get("analyst", {})
+    anomaly  = r.get("anomaly", {})
+    decision = r.get("decision", {})
+    forecast = r.get("forecast", {})
+    stats    = r.get("stats", {})
+    quality  = r.get("quality", {})
+    wrangler = r.get("wrangler", {})
+    qr       = wrangler.get("data_quality_report", {})
+    col_desc = analyst.get("column_descriptions", {})
+
+    lines = [
+        "=== ANALYSIS CONTEXT ===",
+        f"Question: {r.get('question', '')}",
+        f"Dataset: {qr.get('final_row_count','?')} rows × {qr.get('final_column_count','?')} columns",
+        "",
+        f"DATA QUALITY: {quality.get('overall_score', 0):.0f}/100  Grade {quality.get('grade','?')}",
+        quality.get("verdict", ""),
+        "",
+        "COLUMNS:",
+    ]
+    for col, info in list(col_desc.items())[:15]:
+        unit = f" ({info['unit']})" if info.get("unit") else ""
+        lines.append(f"  {col} [{info.get('role','?')}]{unit}: {info.get('description','')}")
+
+    lines += ["", "KEY INSIGHTS:"]
+    for i, ins in enumerate(analyst.get("insights", []), 1):
+        lines.append(f"  {i}. {ins}")
+
+    lines += ["", "TOP ANOMALIES:"]
+    for a in anomaly.get("anomalies", [])[:5]:
+        lines.append(f"  [{a.get('severity','').upper()}] {a.get('entity','')} — "
+                     f"{a.get('column','')} = {a.get('value','')} | {a.get('reason','')[:80]}")
+
+    lines += ["", "DECISIONS:"]
+    for d in decision.get("decisions", []):
+        lines.append(f"  [{d.get('priority','')}] {d.get('action','')[:100]}")
+        lines.append(f"    Rationale: {d.get('rationale','')[:80]}")
+
+    lines += ["", "FORECAST NARRATIVE:"]
+    lines.append(forecast.get("narrative", "No forecast narrative."))
+
+    sig = stats.get("significant_findings", [])
+    lines += ["", f"SIGNIFICANT STATISTICS ({len(sig)} findings):"]
+    for t in sig[:8]:
+        lines.append(f"  {t.get('test_name','')} | {' × '.join(t.get('columns_tested',[]))} | "
+                     f"p={t.get('p_value','?')} | {t.get('effect_label','')} effect")
+
+    return "\n".join(lines)
+
+
+def _stream_chat(context: str, history: list[dict], model: str):
+    """Generator: streams Claude's response token by token."""
+    client = _anthropic.Anthropic()
+    messages = [{"role": m["role"], "content": m["content"]} for m in history]
+    with client.messages.stream(
+        model=model,
+        max_tokens=1024,
+        system=[
+            {
+                "type": "text",
+                "text": CHAT_SYSTEM + "\n\n" + context,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+        messages=messages,
+    ) as stream:
+        for text in stream.text_stream:
+            yield text
+
+
+if st.session_state.results:
+    st.divider()
+
+    # ── Header row ───────────────────────────────────────────────────
+    head_l, head_r = st.columns([5, 1])
+    head_l.subheader("💬 Chat with Aria")
+    if head_r.button("Clear Chat", use_container_width=True):
+        st.session_state.chat_history = []
+        st.session_state.pending_chat = None
+        st.rerun()
+
+    st.caption("Ask follow-up questions about your analysis. Aria knows every insight, anomaly, decision, and forecast.")
+
+    context = _build_chat_context(st.session_state.results)
+
+    # ── Suggested questions ──────────────────────────────────────────
+    sug_cols = st.columns(3)
+    for col, suggestion in zip(sug_cols, SUGGESTIONS):
+        if col.button(suggestion, use_container_width=True, key=f"sug_{suggestion[:10]}"):
+            st.session_state.pending_chat = suggestion
+            st.rerun()
+
+    # ── Conversation history ─────────────────────────────────────────
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"], avatar="📊" if msg["role"] == "assistant" else None):
+            st.markdown(msg["content"])
+
+    # ── Process pending message (from suggestion buttons) ────────────
+    if st.session_state.pending_chat:
+        user_msg = st.session_state.pending_chat
+        st.session_state.pending_chat = None
+        st.session_state.chat_history.append({"role": "user", "content": user_msg})
+        with st.chat_message("user"):
+            st.markdown(user_msg)
+        with st.chat_message("assistant", avatar="📊"):
+            try:
+                reply = st.write_stream(
+                    _stream_chat(context, st.session_state.chat_history, model_id)
+                )
+            except Exception as exc:
+                reply = f"Sorry, I encountered an error: {exc}"
+                st.error(reply)
+        st.session_state.chat_history.append({"role": "assistant", "content": reply})
+        st.rerun()
+
+    # ── Chat input ───────────────────────────────────────────────────
+    if user_input := st.chat_input("Ask Aria about your data…"):
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        with st.chat_message("user"):
+            st.markdown(user_input)
+        with st.chat_message("assistant", avatar="📊"):
+            try:
+                reply = st.write_stream(
+                    _stream_chat(context, st.session_state.chat_history, model_id)
+                )
+            except Exception as exc:
+                reply = f"Sorry, I encountered an error: {exc}"
+                st.error(reply)
+        st.session_state.chat_history.append({"role": "assistant", "content": reply})
