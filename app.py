@@ -39,6 +39,7 @@ from agents.data_prep_agent import DataPrepAgent
 from agents.stats_agent import StatsAgent
 from agents.sql_agent import SQLAgent
 from agents.quality_agent import QualityAgent
+from agents.pptx_agent import PPTXAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -502,7 +503,7 @@ button[kind="primary"]:hover {
 """, unsafe_allow_html=True)
 
 # ── Session state ─────────────────────────────────────────────────────
-for key, default in [("results", None), ("error", None), ("prep", None), ("sql", None)]:
+for key, default in [("results", None), ("error", None), ("prep", None), ("sql", None), ("pptx_path", None)]:
     if key not in st.session_state:
         st.session_state[key] = default
 
@@ -1400,8 +1401,10 @@ with tab_stats:
 with tab_report:
     st.markdown(report["report_text"])
     st.divider()
-    dl_col, path_col = st.columns([1, 3])
-    with dl_col:
+
+    dl_md, dl_pptx, path_col = st.columns([1, 1, 2])
+
+    with dl_md:
         st.download_button(
             label="⬇  Download (.md)",
             data=report["report_text"],
@@ -1409,5 +1412,37 @@ with tab_report:
             mime="text/markdown",
             use_container_width=True,
         )
+
+    with dl_pptx:
+        gen_btn = st.button("📊  Generate PowerPoint", use_container_width=True)
+        if gen_btn:
+            with st.spinner("Building presentation…"):
+                try:
+                    pptx_result = PPTXAgent().run(
+                        question        = question,
+                        analyst_output  = analyst,
+                        viz_output      = viz,
+                        decision_output = decision,
+                        forecast_output = forecast,
+                        quality_output  = quality,
+                        anomaly_output  = anomaly,
+                    )
+                    st.session_state.pptx_path   = pptx_result["pptx_path"]
+                    st.session_state.pptx_slides = pptx_result["slide_count"]
+                except Exception as exc:
+                    st.error(f"PowerPoint generation failed: {exc}")
+
+        pptx_path = st.session_state.get("pptx_path")
+        if pptx_path and os.path.exists(pptx_path):
+            n = st.session_state.get("pptx_slides", "?")
+            with open(pptx_path, "rb") as fh:
+                st.download_button(
+                    label=f"⬇  Download PPTX  ({n} slides)",
+                    data=fh.read(),
+                    file_name=Path(pptx_path).name,
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    use_container_width=True,
+                )
+
     with path_col:
         st.caption(f"Saved to `{report['report_path']}`")
