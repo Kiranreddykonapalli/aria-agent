@@ -22,6 +22,7 @@ import traceback
 from .data_wrangler import DataWrangler
 from .analyst import Analyst
 from .anomaly_agent import AnomalyAgent
+from .decision_agent import DecisionAgent
 from .viz_builder import VizBuilder
 from .report_writer import ReportWriter
 
@@ -37,11 +38,12 @@ def _status(msg: str) -> None:
 class Orchestrator:
     def __init__(self, model: str = "claude-sonnet-4-6"):
         self.model = model
-        self.data_wrangler  = DataWrangler()
-        self.analyst        = Analyst(model=model)
-        self.anomaly_agent  = AnomalyAgent(model=model)
-        self.viz_builder    = VizBuilder()
-        self.report_writer  = ReportWriter(model=model)
+        self.data_wrangler   = DataWrangler()
+        self.analyst         = Analyst(model=model)
+        self.anomaly_agent   = AnomalyAgent(model=model)
+        self.decision_agent  = DecisionAgent(model=model)
+        self.viz_builder     = VizBuilder()
+        self.report_writer   = ReportWriter(model=model)
 
     def run(self, data_path: str, question: str) -> dict:
         """
@@ -71,6 +73,9 @@ class Orchestrator:
             "anomalies":           [],
             "anomaly_narrative":   "",
             "severity_counts":     {"high": 0, "medium": 0, "low": 0},
+            "decisions":           [],
+            "decision_summary":    "",
+            "decision_domain":     "",
             "error":               None,
         }
 
@@ -121,7 +126,28 @@ class Orchestrator:
         except Exception:
             return self._fail(result, "Anomaly Agent", traceback.format_exc())
 
-        # ── Stage 4: Viz Builder ─────────────────────────────────────
+        # ── Stage 4: Decision Agent ──────────────────────────────────
+        _status("\n" + _DIV)
+        _status("  Decision Agent  —  generating actionable decisions")
+        _status(_DIV)
+        try:
+            decision_output = self.decision_agent.run(
+                question       = question,
+                analyst_output = analyst_output,
+                anomaly_output = anomaly_output,
+                dataframe      = wrangler_output["dataframe"],
+            )
+            result["decisions"]        = decision_output["decisions"]
+            result["decision_summary"] = decision_output["summary"]
+            result["decision_domain"]  = decision_output["domain"]
+            _status(
+                f"  OK  {len(decision_output['decisions'])} decisions — "
+                f"domain: {decision_output['domain'][:60]}"
+            )
+        except Exception:
+            return self._fail(result, "Decision Agent", traceback.format_exc())
+
+        # ── Stage 5: Viz Builder ─────────────────────────────────────
         _status("\n" + _DIV)
         _status("  Viz Builder  —  rendering charts")
         _status(_DIV)
@@ -138,7 +164,7 @@ class Orchestrator:
         except Exception:
             return self._fail(result, "Viz Builder", traceback.format_exc())
 
-        # ── Stage 5: Report Writer ───────────────────────────────────
+        # ── Stage 6: Report Writer ───────────────────────────────────
         _status("\n" + _DIV)
         _status("  Report Writer  —  composing final report")
         _status(_DIV)

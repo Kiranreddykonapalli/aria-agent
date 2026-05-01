@@ -33,6 +33,7 @@ from agents.viz_builder import VizBuilder
 from agents.report_writer import ReportWriter
 from agents.email_agent import EmailAgent
 from agents.anomaly_agent import AnomalyAgent
+from agents.decision_agent import DecisionAgent
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -263,6 +264,65 @@ button[kind="primary"]:hover {
     margin-right: 0.4rem;
 }
 
+/* ── Decision cards ──────────────────────────────────────── */
+.decision-card {
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+    padding: 1.1rem 1.3rem;
+    margin-bottom: 0.85rem;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.decision-header {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin-bottom: 0.6rem;
+    flex-wrap: wrap;
+}
+.priority-badge {
+    padding: 0.22rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+.timeline-badge {
+    padding: 0.2rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: #f3f4f6;
+    color: #374151;
+    flex-shrink: 0;
+}
+.decision-action {
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #111827;
+    line-height: 1.5;
+    margin-bottom: 0.55rem;
+}
+.decision-meta {
+    font-size: 0.82rem;
+    color: #374151;
+    line-height: 1.6;
+}
+.decision-meta strong { color: #111827; }
+.domain-pill {
+    display: inline-block;
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    border-radius: 999px;
+    padding: 0.3rem 1rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: #1a56db;
+    margin-bottom: 1.2rem;
+}
+
 /* ── Caption ─────────────────────────────────────────────── */
 [data-testid="stCaptionContainer"] { color: #9ca3af; }
 </style>
@@ -377,6 +437,18 @@ def run_pipeline(data_path: str, question: str, model: str) -> None:
                 f"🔴 {sc['high']} high · 🟠 {sc['medium']} medium · 🟡 {sc['low']} low"
             )
 
+            st.write("🎯 **Decision Agent** — generating actionable decisions…")
+            decision_output = DecisionAgent(model=model).run(
+                question       = question,
+                analyst_output = analyst_output,
+                anomaly_output = anomaly_output,
+                dataframe      = wrangler_output["dataframe"],
+            )
+            st.write(
+                f"✓ {len(decision_output['decisions'])} decisions · "
+                f"domain: {decision_output['domain'][:70]}"
+            )
+
             st.write("📈 **Viz Builder** — rendering charts…")
             viz_output = VizBuilder().run(wrangler_output, analyst_output)
             st.write(
@@ -398,12 +470,13 @@ def run_pipeline(data_path: str, question: str, model: str) -> None:
             return
 
     st.session_state.results = {
-        "wrangler": wrangler_output,
-        "analyst":  analyst_output,
-        "anomaly":  anomaly_output,
-        "viz":      viz_output,
-        "report":   report_output,
-        "question": question,
+        "wrangler":  wrangler_output,
+        "analyst":   analyst_output,
+        "anomaly":   anomaly_output,
+        "decision":  decision_output,
+        "viz":       viz_output,
+        "report":    report_output,
+        "question":  question,
     }
 
 
@@ -490,13 +563,14 @@ r        = st.session_state.results
 wrangler = r["wrangler"]
 analyst  = r["analyst"]
 anomaly  = r["anomaly"]
+decision = r["decision"]
 viz      = r["viz"]
 report   = r["report"]
 question = r["question"]
 
 st.markdown(f"#### Results — *{question}*")
-tab_insights, tab_charts, tab_anomalies, tab_report = st.tabs(
-    ["💡  Insights", "📊  Charts", "🔎  Anomalies", "📄  Report"]
+tab_insights, tab_charts, tab_anomalies, tab_decisions, tab_report = st.tabs(
+    ["💡  Insights", "📊  Charts", "🔎  Anomalies", "🎯  Decisions", "📄  Report"]
 )
 
 # ── Tab 1: Insights ───────────────────────────────────────────────────
@@ -645,7 +719,52 @@ with tab_anomalies:
         if line.strip():
             st.markdown(line)
 
-# ── Tab 4: Report ─────────────────────────────────────────────────────
+# ── Tab 4: Decisions ─────────────────────────────────────────────────
+with tab_decisions:
+    PRIORITY_STYLE = {
+        "Critical": ("#fef2f2", "#991b1b", "🔴"),
+        "High":     ("#fff7ed", "#9a3412", "🟠"),
+        "Medium":   ("#eff6ff", "#1e40af", "🔵"),
+    }
+
+    if decision.get("domain"):
+        st.markdown(
+            f'<div class="domain-pill">🏷 {decision["domain"]}</div>',
+            unsafe_allow_html=True,
+        )
+
+    decisions = decision.get("decisions", [])
+    if not decisions:
+        st.info("No decisions generated.")
+    else:
+        for i, d in enumerate(decisions, 1):
+            priority  = d.get("priority", "Medium")
+            bg, fg, icon = PRIORITY_STYLE.get(priority, ("#f3f4f6", "#374151", "⚪"))
+            timeline  = d.get("timeline", "")
+
+            st.markdown(f"""
+            <div class="decision-card" style="border-left: 4px solid {fg};">
+              <div class="decision-header">
+                <span class="priority-badge" style="background:{bg};color:{fg};">
+                  {icon} {priority}
+                </span>
+                <span class="timeline-badge">⏱ {timeline}</span>
+                <span style="font-size:0.75rem;color:#9ca3af;">Decision {i} of {len(decisions)}</span>
+              </div>
+              <div class="decision-action">{d.get('action', '')}</div>
+              <div class="decision-meta">
+                <strong>Rationale:</strong> {d.get('rationale', '')}<br>
+                <strong>Expected impact:</strong> {d.get('expected_impact', '')}
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    if decision.get("summary"):
+        st.divider()
+        st.subheader("Decision Summary")
+        st.markdown(decision["summary"])
+
+# ── Tab 5: Report ─────────────────────────────────────────────────────
 with tab_report:
     st.markdown(report["report_text"])
     st.divider()
