@@ -122,8 +122,20 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 [data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3 { color:#fff !important; }
 [data-testid="stSidebar"] [data-testid="stFileUploader"] {
-    background:rgba(255,255,255,.06); border:1.5px dashed rgba(255,255,255,.2);
-    border-radius:12px; padding:0.4rem;
+    background:rgba(255,255,255,.07) !important;
+    border:2px dashed rgba(255,255,255,.45) !important;
+    border-radius:12px !important; padding:0.4rem !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploader"] * {
+    color:rgba(255,255,255,.85) !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileUploader"] button {
+    background:rgba(255,255,255,.12) !important;
+    border:1px solid rgba(255,255,255,.3) !important;
+    color:#fff !important;
+}
+[data-testid="stSidebar"] [data-testid="stFileDropzone"] {
+    background:rgba(255,255,255,.05) !important;
 }
 [data-testid="stSidebar"] textarea {
     background:rgba(255,255,255,.08) !important;
@@ -150,6 +162,22 @@ button[kind="primary"] {
 }
 button[kind="primary"]:hover {
     box-shadow:0 8px 30px rgba(102,126,234,.6) !important;
+    transform:translateY(-1px) !important;
+}
+/* Demo button — secondary style on dark sidebar */
+[data-testid="stSidebar"] button[kind="secondary"],
+[data-testid="stSidebar"] button:not([kind="primary"]) {
+    background:#ffffff !important;
+    border:1.5px solid rgba(102,126,234,.4) !important;
+    color:#667eea !important;
+    font-weight:700 !important;
+    border-radius:12px !important;
+    transition:all .2s !important;
+}
+[data-testid="stSidebar"] button[kind="secondary"]:hover,
+[data-testid="stSidebar"] button:not([kind="primary"]):hover {
+    background:#f0f2ff !important;
+    border-color:#667eea !important;
     transform:translateY(-1px) !important;
 }
 
