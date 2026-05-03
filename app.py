@@ -126,14 +126,20 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     border:1.5px dashed rgba(255,255,255,0.3) !important;
     border-radius:12px !important;
 }
-[data-testid="stFileUploaderDropzoneInput"] + div button,
-[data-testid="stFileUploaderDropzone"] button {
+/* Upload button */
+section[data-testid="stFileUploaderDropzone"] button {
     background:linear-gradient(135deg,#667eea,#764ba2) !important;
     color:white !important;
-    font-weight:600 !important;
     border:none !important;
-    padding:0.5rem 1.5rem !important;
+    font-weight:600 !important;
     border-radius:8px !important;
+}
+section[data-testid="stFileUploaderDropzone"] button p {
+    color:white !important;
+    font-weight:600 !important;
+}
+section[data-testid="stFileUploaderDropzone"] button span {
+    color:white !important;
 }
 [data-testid="stFileUploaderDropzone"] p,
 [data-testid="stFileUploaderDropzone"] small {
@@ -166,24 +172,19 @@ button[kind="primary"]:hover {
     box-shadow:0 8px 30px rgba(102,126,234,.6) !important;
     transform:translateY(-1px) !important;
 }
-/* Demo button — secondary style on dark sidebar */
-[data-testid="stBaseButton-secondary"],
-[data-testid="stSidebar"] button[kind="secondary"],
-[data-testid="stSidebar"] button:not([kind="primary"]) {
+/* Demo button */
+div[data-testid="stBaseButton-secondary"] button {
     background:white !important;
-    color:#667eea !important;
+    color:#5b21b6 !important;
     border:2px solid #667eea !important;
-    font-weight:600 !important;
-    border-radius:12px !important;
-    transition:all .2s !important;
+    font-weight:700 !important;
 }
-[data-testid="stBaseButton-secondary"]:hover,
-[data-testid="stSidebar"] button[kind="secondary"]:hover,
-[data-testid="stSidebar"] button:not([kind="primary"]):hover {
-    background:#f0f2ff !important;
-    border-color:#764ba2 !important;
-    color:#764ba2 !important;
-    transform:translateY(-1px) !important;
+div[data-testid="stBaseButton-secondary"] button p {
+    color:#5b21b6 !important;
+    font-weight:700 !important;
+}
+div[data-testid="stBaseButton-secondary"] button span {
+    color:#5b21b6 !important;
 }
 
 /* ── Metric cards ────────────────────────────────────────── */
