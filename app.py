@@ -1,11 +1,6 @@
 """
-Aria — Autonomous Reasoning & Insight Agent — Streamlit frontend.
-
-Runs the full DataWrangler -> Analyst -> VizBuilder -> ReportWriter pipeline
-with live per-stage progress. Results surface in three tabs:
-  - Insights   : 5 key findings + data quality metrics + column descriptions
-  - Charts     : 2-column grid of every generated PNG
-  - Report     : full rendered markdown + download button
+Aria v2.0 — Autonomous Reasoning & Insight Agent — Streamlit frontend.
+Premium redesign: Inter font · #667eea–#764ba2 gradient · Plotly charts · 18 agents.
 """
 
 from __future__ import annotations
@@ -19,7 +14,7 @@ import streamlit as st
 
 st.set_page_config(
     page_title="Aria — AI Data Analyst",
-    page_icon="📊",
+    page_icon="✦",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -43,6 +38,8 @@ from agents.pptx_agent import PPTXAgent
 from agents.whatif_agent import WhatIfAgent
 from agents.debate_agent import DebateAgent
 from agents.blindspot_agent import BlindSpotAgent
+import plotly.express as px
+import plotly.graph_objects as go
 
 # ── Constants ─────────────────────────────────────────────────────────
 DEMO_CSV      = "data/raw/florida_health_2024.csv"
@@ -59,277 +56,214 @@ INSIGHT_COLORS  = ["#1a56db", "#7c3aed", "#059669", "#d97706", "#dc2626"]
 
 # ── CSS ───────────────────────────────────────────────────────────────
 st.markdown("""
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
+/* ═══════════════════════════════════════════════════════════
+   ARIA v2.0 — Premium Design System
+   Font: Inter | Primary: #667eea → #764ba2
+   ═══════════════════════════════════════════════════════════ */
+
 /* ── Global ───────────────────────────────────────────────── */
-html, body, [data-testid="stAppViewContainer"] {
-    background: #ffffff;
+html, body, .stApp, [data-testid="stAppViewContainer"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif !important;
+    background: #f0f2ff !important;
 }
+.main .block-container { padding: 1.2rem 2rem 5rem; max-width: 1350px; }
 
 /* ── Hero header ─────────────────────────────────────────── */
-.hero-wrap {
-    padding: 2.2rem 0 1.4rem 0;
-    border-bottom: 1px solid #e5e7eb;
-    margin-bottom: 1.6rem;
+.hero-outer { text-align:center; padding:2.5rem 0 1.8rem; margin-bottom:0.5rem; }
+.hero-logo {
+    font-size:3.8rem; font-weight:900; letter-spacing:-3px; line-height:1;
+    background:linear-gradient(135deg,#667eea 0%,#764ba2 50%,#f093fb 100%);
+    background-size:200% 200%;
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
+    animation:gradPulse 5s ease infinite;
+    margin-bottom:0.6rem;
 }
-.gradient-title {
-    font-size: 2.6rem;
-    font-weight: 800;
-    line-height: 1.15;
-    background: linear-gradient(135deg, #1a56db 0%, #3b82f6 55%, #06b6d4 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin: 0 0 0.3rem 0;
+@keyframes gradPulse {
+    0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%}
 }
-.hero-tagline {
-    font-size: 1.2rem;
-    color: #374151;
-    font-weight: 400;
-    margin: 0 0 0.5rem 0;
+.hero-sub-wrap { position:relative; height:2.1rem; margin-bottom:0.8rem; }
+.cycle-text {
+    position:absolute; left:50%; transform:translateX(-50%);
+    font-size:1.25rem; font-weight:500; color:#475569;
+    opacity:0; white-space:nowrap;
 }
-.powered-by {
-    font-size: 0.78rem;
-    color: #9ca3af;
-    letter-spacing: 0.03em;
-    margin: 0;
+.ct1{animation:cycleT 16s infinite 0s}
+.ct2{animation:cycleT 16s infinite 4s}
+.ct3{animation:cycleT 16s infinite 8s}
+.ct4{animation:cycleT 16s infinite 12s}
+@keyframes cycleT {
+    0%,100%{opacity:0;transform:translateX(-50%) translateY(8px)}
+    8%,22%{opacity:1;transform:translateX(-50%) translateY(0)}
+    30%{opacity:0;transform:translateX(-50%) translateY(-8px)}
+}
+.hero-tagline { font-size:1rem; color:#64748b; margin:0 0 0.9rem; }
+.hero-badge {
+    display:inline-block;
+    background:linear-gradient(135deg,rgba(102,126,234,.1),rgba(118,75,162,.1));
+    border:1px solid rgba(102,126,234,.25); border-radius:999px;
+    padding:0.3rem 1.1rem; font-size:0.75rem; font-weight:600;
+    color:#667eea; letter-spacing:.03em;
 }
 
 /* ── Sidebar ─────────────────────────────────────────────── */
 [data-testid="stSidebar"] {
-    background: #f8faff;
-    border-right: 1px solid #dde3f0;
+    background:linear-gradient(180deg,#0f0c29 0%,#302b63 55%,#24243e 100%) !important;
+    border-right:1px solid rgba(255,255,255,.04) !important;
 }
-[data-testid="stSidebar"] h2 {
-    color: #1a56db;
-    font-size: 1rem;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+[data-testid="stSidebar"] .stMarkdown,
+[data-testid="stSidebar"] label,
+[data-testid="stSidebar"] p,
+[data-testid="stSidebar"] span:not(.stSelectbox span) {
+    color:rgba(255,255,255,.82) !important;
 }
+[data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,
+[data-testid="stSidebar"] h3 { color:#fff !important; }
+[data-testid="stSidebar"] [data-testid="stFileUploader"] {
+    background:rgba(255,255,255,.06); border:1.5px dashed rgba(255,255,255,.2);
+    border-radius:12px; padding:0.4rem;
+}
+[data-testid="stSidebar"] textarea {
+    background:rgba(255,255,255,.08) !important;
+    border:1px solid rgba(255,255,255,.15) !important;
+    color:#fff !important; border-radius:10px !important;
+}
+[data-testid="stSidebar"] hr { border-color:rgba(255,255,255,.1) !important; }
+[data-testid="stSidebar"] .stSuccess { background:rgba(16,185,129,.2) !important; }
 .sidebar-footer {
-    border-top: 1px solid #dde3f0;
-    padding-top: 1rem;
-    margin-top: 1rem;
-    font-size: 0.78rem;
-    color: #6b7280;
-    line-height: 1.7;
+    border-top:1px solid rgba(255,255,255,.1); padding-top:1rem; margin-top:1rem;
+    font-size:0.77rem; color:rgba(255,255,255,.45); line-height:1.7; text-align:center;
 }
-.sidebar-footer strong { color: #111827; }
+.sidebar-footer strong { color:rgba(255,255,255,.75); }
 
-/* ── Run button ──────────────────────────────────────────── */
+/* ── Buttons ─────────────────────────────────────────────── */
 button[kind="primary"] {
-    background: linear-gradient(135deg, #1a56db 0%, #3b82f6 100%) !important;
-    border: none !important;
-    color: #ffffff !important;
-    font-weight: 700 !important;
-    font-size: 0.95rem !important;
-    letter-spacing: 0.02em !important;
-    border-radius: 10px !important;
-    padding: 0.65rem 1.4rem !important;
-    box-shadow: 0 4px 14px rgba(26, 86, 219, 0.35) !important;
-    transition: box-shadow 0.2s ease !important;
+    background:linear-gradient(135deg,#667eea 0%,#764ba2 100%) !important;
+    border:none !important; color:#fff !important; font-weight:700 !important;
+    font-size:0.9rem !important; border-radius:12px !important;
+    padding:0.65rem 1.4rem !important;
+    box-shadow:0 4px 20px rgba(102,126,234,.45) !important;
+    transition:all .25s cubic-bezier(.4,0,.2,1) !important;
+    font-family:'Inter',sans-serif !important;
 }
 button[kind="primary"]:hover {
-    box-shadow: 0 6px 20px rgba(26, 86, 219, 0.5) !important;
+    box-shadow:0 8px 30px rgba(102,126,234,.6) !important;
+    transform:translateY(-1px) !important;
 }
 
 /* ── Metric cards ────────────────────────────────────────── */
 [data-testid="stMetric"] {
-    background: #f0f4ff;
-    border: 1px solid #c7d7f8;
-    border-radius: 10px;
-    padding: 0.9rem 1.1rem;
+    background:#fff; border-radius:16px; padding:1.1rem 1.2rem;
+    border:1px solid rgba(102,126,234,.12);
+    box-shadow:0 1px 3px rgba(0,0,0,.06),0 4px 12px rgba(102,126,234,.08);
+    transition:transform .2s,box-shadow .2s;
 }
-[data-testid="stMetricLabel"] { color: #6b7280; font-size: 0.8rem; }
-[data-testid="stMetricValue"] { color: #111827; font-weight: 700; }
+[data-testid="stMetric"]:hover {
+    transform:translateY(-2px);
+    box-shadow:0 4px 14px rgba(0,0,0,.1),0 8px 24px rgba(102,126,234,.15);
+}
+[data-testid="stMetricLabel"] { color:#64748b; font-size:0.72rem; font-weight:600; letter-spacing:.05em; text-transform:uppercase; }
+[data-testid="stMetricValue"] { color:#0f172a; font-weight:800; font-size:1.9rem; }
 
 /* ── Insight cards ───────────────────────────────────────── */
 .insight-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.85rem;
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    padding: 1rem 1.2rem;
-    margin-bottom: 0.75rem;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-    transition: box-shadow 0.15s ease;
+    display:flex; align-items:flex-start; gap:.9rem; background:#fff;
+    border:1px solid rgba(102,126,234,.12); border-radius:14px;
+    padding:1.1rem 1.3rem; margin-bottom:.7rem;
+    box-shadow:0 1px 3px rgba(0,0,0,.05),0 4px 12px rgba(102,126,234,.06);
+    transition:all .2s; animation:fadeUp .4s ease;
 }
-.insight-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,0.1); }
-.insight-icon {
-    font-size: 1.4rem;
-    line-height: 1;
-    flex-shrink: 0;
-    margin-top: 0.1rem;
-}
-.insight-body { flex: 1; }
-.insight-num {
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    margin-bottom: 0.2rem;
-}
-.insight-text {
-    font-size: 0.93rem;
-    line-height: 1.65;
-    color: #374151;
-    margin: 0;
-}
+.insight-card:hover { transform:translateY(-2px); box-shadow:0 6px 20px rgba(102,126,234,.15); }
+@keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+.insight-icon { font-size:1.5rem; line-height:1; flex-shrink:0; margin-top:.1rem; }
+.insight-body { flex:1; }
+.insight-num { font-size:.68rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; margin-bottom:.2rem; }
+.insight-text { font-size:.92rem; line-height:1.7; color:#374151; margin:0; }
 
 /* ── Step cards (landing) ────────────────────────────────── */
 .step-card {
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-top: 4px solid var(--step-color, #1a56db);
-    border-radius: 10px;
-    padding: 1.2rem 1rem 1rem 1rem;
-    text-align: center;
-    height: 100%;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+    background:#fff; border:1px solid rgba(102,126,234,.12);
+    border-top:4px solid var(--step-color,#667eea); border-radius:14px;
+    padding:1.3rem 1rem 1.1rem; text-align:center;
+    box-shadow:0 2px 8px rgba(102,126,234,.08); transition:all .2s;
 }
-.step-icon { font-size: 1.9rem; margin-bottom: 0.4rem; }
-.step-label {
-    font-weight: 700;
-    font-size: 0.9rem;
-    color: #111827;
-    margin-bottom: 0.3rem;
-}
-.step-desc { font-size: 0.8rem; color: #6b7280; line-height: 1.45; }
-.arrow-col {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding-top: 1.8rem;
-    font-size: 1.3rem;
-    color: #c7d7f8;
-}
+.step-card:hover { transform:translateY(-3px); box-shadow:0 8px 24px rgba(102,126,234,.18); }
+.step-icon { font-size:2rem; margin-bottom:.5rem; }
+.step-label { font-weight:800; font-size:.9rem; color:#0f172a; margin-bottom:.3rem; }
+.step-desc { font-size:.78rem; color:#64748b; line-height:1.5; }
+.arrow-col { display:flex; align-items:center; justify-content:center; padding-top:1.8rem; font-size:1.4rem; color:rgba(102,126,234,.3); }
 
 /* ── Demo card (landing) ─────────────────────────────────── */
 .demo-card {
-    background: linear-gradient(135deg, #eff6ff 0%, #f0f4ff 100%);
-    border: 1px solid #c7d7f8;
-    border-radius: 12px;
-    padding: 1.4rem 1.6rem;
+    background:linear-gradient(135deg,rgba(102,126,234,.06) 0%,rgba(118,75,162,.06) 100%);
+    border:1px solid rgba(102,126,234,.2); border-radius:16px; padding:1.5rem 1.8rem;
 }
-.demo-card h3 { color: #1a56db; margin-top: 0; }
+.demo-card h3 { color:#667eea; margin-top:0; }
 
 /* ── Tabs ────────────────────────────────────────────────── */
-.stTabs [data-baseweb="tab-list"] { gap: 6px; border-bottom: 2px solid #e5e7eb; }
-.stTabs [data-baseweb="tab"] {
-    border-radius: 8px 8px 0 0;
-    font-weight: 600;
-    color: #6b7280;
-    padding: 0.55rem 1.1rem;
+.stTabs [data-baseweb="tab-list"] {
+    background:#fff; border-radius:14px; padding:4px; gap:2px;
+    box-shadow:0 1px 3px rgba(0,0,0,.06); border:1px solid rgba(102,126,234,.1);
+    overflow-x:auto;
 }
-.stTabs [aria-selected="true"] { color: #1a56db; }
+.stTabs [data-baseweb="tab"] {
+    border-radius:10px; color:#64748b; font-weight:500;
+    font-size:.78rem; padding:.45rem .9rem; transition:all .2s; white-space:nowrap;
+}
+.stTabs [aria-selected="true"] {
+    background:linear-gradient(135deg,#667eea,#764ba2) !important;
+    color:#fff !important; font-weight:700 !important;
+}
 
 /* ── Anomaly cards ───────────────────────────────────────── */
 .anomaly-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 0.9rem;
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 10px;
-    padding: 0.85rem 1.1rem;
-    margin-bottom: 0.6rem;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    display:flex; align-items:flex-start; gap:.9rem; background:#fff;
+    border:1px solid rgba(102,126,234,.1); border-radius:12px;
+    padding:.9rem 1.1rem; margin-bottom:.55rem;
+    box-shadow:0 1px 3px rgba(0,0,0,.04); transition:all .2s;
 }
+.anomaly-card:hover { box-shadow:0 4px 14px rgba(0,0,0,.09); }
 .anomaly-badge {
-    flex-shrink: 0;
-    padding: 0.2rem 0.55rem;
-    border-radius: 999px;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    text-transform: uppercase;
-    margin-top: 0.1rem;
+    flex-shrink:0; padding:.2rem .55rem; border-radius:999px;
+    font-size:.68rem; font-weight:700; letter-spacing:.06em; text-transform:uppercase; margin-top:.1rem;
 }
-.anomaly-body { flex: 1; min-width: 0; }
-.anomaly-entity {
-    font-weight: 700;
-    font-size: 0.9rem;
-    color: #111827;
-    margin-bottom: 0.15rem;
+/* Critical pulsing dot */
+.pulse-dot {
+    width:10px; height:10px; border-radius:50%; flex-shrink:0; margin-top:4px;
 }
-.anomaly-meta {
-    font-size: 0.78rem;
-    color: #6b7280;
-    margin-bottom: 0.3rem;
+.pulse-dot.critical { animation:pulseDot 1.6s infinite; }
+@keyframes pulseDot {
+    0%{box-shadow:0 0 0 0 rgba(239,68,68,.5)}
+    70%{box-shadow:0 0 0 8px rgba(239,68,68,0)}
+    100%{box-shadow:0 0 0 0 rgba(239,68,68,0)}
 }
-.anomaly-reason {
-    font-size: 0.83rem;
-    color: #374151;
-    line-height: 1.55;
-}
-.severity-pill {
-    display: inline-block;
-    padding: 0.25rem 0.8rem;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    font-weight: 700;
-    margin-right: 0.4rem;
-}
+.anomaly-body { flex:1; min-width:0; }
+.anomaly-entity { font-weight:700; font-size:.9rem; color:#0f172a; margin-bottom:.12rem; }
+.anomaly-meta { font-size:.76rem; color:#64748b; margin-bottom:.25rem; }
+.anomaly-reason { font-size:.82rem; color:#374151; line-height:1.6; }
+.severity-pill { display:inline-block; padding:.22rem .75rem; border-radius:999px; font-size:.72rem; font-weight:700; margin-right:.4rem; }
 
 /* ── Decision cards ──────────────────────────────────────── */
 .decision-card {
-    background: #ffffff;
-    border: 1px solid #e5e7eb;
-    border-radius: 12px;
-    padding: 1.1rem 1.3rem;
-    margin-bottom: 0.85rem;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    background:#fff; border:1px solid rgba(102,126,234,.12); border-radius:16px;
+    padding:1.2rem 1.4rem; margin-bottom:.85rem;
+    box-shadow:0 2px 8px rgba(102,126,234,.07); transition:all .2s;
 }
-.decision-header {
-    display: flex;
-    align-items: center;
-    gap: 0.7rem;
-    margin-bottom: 0.6rem;
-    flex-wrap: wrap;
-}
-.priority-badge {
-    padding: 0.22rem 0.7rem;
-    border-radius: 999px;
-    font-size: 0.7rem;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    flex-shrink: 0;
-}
-.timeline-badge {
-    padding: 0.2rem 0.65rem;
-    border-radius: 6px;
-    font-size: 0.7rem;
-    font-weight: 600;
-    background: #f3f4f6;
-    color: #374151;
-    flex-shrink: 0;
-}
-.decision-action {
-    font-size: 0.95rem;
-    font-weight: 700;
-    color: #111827;
-    line-height: 1.5;
-    margin-bottom: 0.55rem;
-}
-.decision-meta {
-    font-size: 0.82rem;
-    color: #374151;
-    line-height: 1.6;
-}
-.decision-meta strong { color: #111827; }
+.decision-card:hover { transform:translateY(-2px); box-shadow:0 6px 20px rgba(102,126,234,.14); }
+.decision-header { display:flex; align-items:center; gap:.7rem; margin-bottom:.65rem; flex-wrap:wrap; }
+.priority-badge { padding:.22rem .75rem; border-radius:999px; font-size:.68rem; font-weight:800; letter-spacing:.07em; text-transform:uppercase; flex-shrink:0; }
+.timeline-badge { padding:.2rem .65rem; border-radius:8px; font-size:.7rem; font-weight:600; background:#f1f5f9; color:#475569; flex-shrink:0; }
+.decision-action { font-size:.95rem; font-weight:700; color:#0f172a; line-height:1.55; margin-bottom:.55rem; }
+.decision-meta { font-size:.82rem; color:#374151; line-height:1.65; }
+.decision-meta strong { color:#0f172a; }
 .domain-pill {
-    display: inline-block;
-    background: #eff6ff;
-    border: 1px solid #bfdbfe;
-    border-radius: 999px;
-    padding: 0.3rem 1rem;
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: #1a56db;
-    margin-bottom: 1.2rem;
+    display:inline-block;
+    background:linear-gradient(135deg,rgba(102,126,234,.1),rgba(118,75,162,.1));
+    border:1px solid rgba(102,126,234,.2); border-radius:999px;
+    padding:.3rem 1.1rem; font-size:.78rem; font-weight:700;
+    color:#667eea; margin-bottom:1.2rem; letter-spacing:.02em;
 }
 
 /* ── Forecast cards ──────────────────────────────────────── */
@@ -538,8 +472,60 @@ button[kind="primary"]:hover {
     font-size: 0.75rem; font-weight: 700; margin-top: 0.5rem;
 }
 
-/* ── Caption ─────────────────────────────────────────────── */
-[data-testid="stCaptionContainer"] { color: #9ca3af; }
+/* ── Expanders ───────────────────────────────────────────── */
+[data-testid="stExpander"] {
+    background:#fff; border:1px solid rgba(102,126,234,.12) !important;
+    border-radius:14px !important; box-shadow:0 1px 3px rgba(0,0,0,.05); overflow:hidden;
+}
+details summary { font-weight:600; color:#0f172a; }
+
+/* ── Chat ────────────────────────────────────────────────── */
+[data-testid="stChatMessage"] {
+    background:#fff; border-radius:14px; border:1px solid rgba(102,126,234,.1);
+    box-shadow:0 1px 3px rgba(0,0,0,.04); margin-bottom:.75rem;
+    animation:fadeUp .3s ease;
+}
+
+/* ── Status (pipeline) ───────────────────────────────────── */
+[data-testid="stStatus"] {
+    background:#fff !important; border-radius:16px !important;
+    border:1px solid rgba(102,126,234,.15) !important;
+    box-shadow:0 4px 20px rgba(102,126,234,.1) !important;
+}
+
+/* ── Score card ──────────────────────────────────────────── */
+.score-card {
+    background:linear-gradient(135deg,rgba(102,126,234,.08) 0%,#fff 60%);
+    border:1px solid rgba(102,126,234,.18); border-radius:20px;
+    padding:1.8rem 2.2rem; margin-bottom:1.4rem;
+    display:flex; align-items:center; gap:2rem; flex-wrap:wrap;
+    box-shadow:0 4px 20px rgba(102,126,234,.1);
+}
+.score-number { font-size:4rem; font-weight:900; line-height:1; color:#0f172a; flex-shrink:0; }
+.score-grade {
+    font-size:1.9rem; font-weight:900; width:3rem; height:3rem; border-radius:50%;
+    display:flex; align-items:center; justify-content:center; flex-shrink:0; color:#fff;
+    box-shadow:0 4px 14px rgba(0,0,0,.2);
+}
+.score-body { flex:1; min-width:220px; }
+.score-label { font-size:.72rem; font-weight:800; letter-spacing:.1em; text-transform:uppercase; color:#64748b; margin-bottom:.3rem; }
+.score-verdict { font-size:.9rem; color:#374151; line-height:1.7; }
+
+/* ── KPI row ─────────────────────────────────────────────── */
+.kpi-section { margin-bottom:1.2rem; }
+
+/* ── Misc ────────────────────────────────────────────────── */
+hr { border-color:rgba(102,126,234,.12) !important; }
+[data-testid="stCaptionContainer"] { color:#94a3b8; font-size:.74rem; }
+[data-testid="stDataFrame"] { border-radius:12px; overflow:hidden; border:1px solid rgba(102,126,234,.1); }
+
+/* ── Footer ──────────────────────────────────────────────── */
+.aria-footer {
+    text-align:center; padding:2rem 0 1rem;
+    border-top:1px solid rgba(102,126,234,.1); margin-top:3rem;
+    font-size:.75rem; color:#94a3b8; letter-spacing:.02em;
+}
+.aria-footer strong { color:#667eea; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -556,16 +542,34 @@ for key, default in [
 
 # ── Hero header ───────────────────────────────────────────────────────
 st.markdown("""
-<div class="hero-wrap">
-    <p class="gradient-title">📊 Aria</p>
-    <p class="hero-tagline">Ask anything about your data. Get answers in seconds.</p>
-    <p class="powered-by">Autonomous Reasoning &amp; Insight Agent &nbsp;·&nbsp; Powered by Claude · Anthropic</p>
+<div class="hero-outer">
+  <div class="hero-logo">✦ Aria</div>
+  <div class="hero-sub-wrap">
+    <span class="cycle-text ct1">Your AI Data Analyst</span>
+    <span class="cycle-text ct2">Your AI Detective</span>
+    <span class="cycle-text ct3">Your AI Advisor</span>
+    <span class="cycle-text ct4">Your AI Forecaster</span>
+  </div>
+  <p class="hero-tagline">18 AI agents. One upload. Infinite insights.</p>
+  <span class="hero-badge">Powered by Claude · Anthropic</span>
 </div>
 """, unsafe_allow_html=True)
 
 # ── Sidebar ───────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("Setup")
+    st.markdown("""
+    <div style="text-align:center;padding:1.5rem 0 1.2rem;">
+      <div style="font-size:2.2rem;font-weight:900;letter-spacing:-2px;
+                  background:linear-gradient(135deg,#a78bfa,#818cf8);
+                  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+                  background-clip:text;">✦ Aria</div>
+      <div style="font-size:.6rem;font-weight:700;letter-spacing:.25em;
+                  color:rgba(255,255,255,.35);text-transform:uppercase;margin-top:.2rem;">
+        AI Analytics Platform
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    st.divider()
 
     uploaded_file = st.file_uploader(
         "Upload CSV",
@@ -616,10 +620,11 @@ with st.sidebar:
                 else:
                     st.error(f"Failed: {outcome['message']}")
 
-    # ── Footer ────────────────────────────────────────────────────
+    # ── Sidebar footer ────────────────────────────────────────
     st.markdown("""
     <div class="sidebar-footer">
-        Built by <strong>Kiran Reddy Konapalli</strong>
+        Built by <strong>Kiran Kumar Reddy Konapalli</strong><br>
+        <span style="font-size:.65rem;opacity:.5;">18 Agents · Claude SDK · Streamlit</span>
     </div>
     """, unsafe_allow_html=True)
 
@@ -1024,17 +1029,87 @@ if not st.session_state.results:
     with demo_col:
         st.markdown("""
         <div class="demo-card">
-            <h3>⚡ Try the demo</h3>
-            <p>Click <strong>Demo: Florida Health</strong> in the sidebar to run a full analysis on
-            a 402-row Florida county health dataset (2019–2024) — covering uninsured rates,
-            obesity, diabetes, physician access, income, and more.</p>
-            <p style="margin:0;color:#6b7280;font-size:0.85rem;">
-                No file upload needed · Results in ~30 seconds
-            </p>
+            <h3>⚡ Try the demo — no upload needed</h3>
+            <p>Click <strong>Demo: Florida Health</strong> in the sidebar to analyse a 402-row
+            Florida county health dataset (2019–2024). Includes 18 agents, Plotly charts,
+            anomaly detection, AI decisions, forecasts, and a full report.</p>
+            <p style="margin:0;font-size:.82rem;opacity:.6;">~60 seconds · 18 agents · Claude Sonnet 4.6</p>
         </div>
         """, unsafe_allow_html=True)
 
+    st.markdown("""
+    <div class="aria-footer">
+      <strong>Aria v2.0</strong> &nbsp;·&nbsp; 18 AI Agents &nbsp;·&nbsp;
+      Powered by Claude · Anthropic &nbsp;·&nbsp;
+      Built by <strong>Kiran Kumar Reddy Konapalli</strong>
+    </div>
+    """, unsafe_allow_html=True)
     st.stop()
+
+# ── Plotly chart helper ───────────────────────────────────────────────
+def _plotly(df: pd.DataFrame, spec: dict, col_desc: dict):
+    """Generate an interactive Plotly figure from a chart spec dict."""
+    chart_type = spec.get("type", "").lower()
+    x_col  = spec.get("x")
+    y_col  = spec.get("y")
+    title  = spec.get("title", "")
+    if x_col and x_col not in df.columns: return None
+    if y_col and y_col not in df.columns: return None
+    cat_cols   = df.select_dtypes(exclude="number").columns.tolist()
+    entity_col = cat_cols[0] if cat_cols else None
+    DARK = dict(
+        template="plotly_dark", paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="#0f0c29", font=dict(family="Inter,sans-serif", color="#e2e8f0", size=11),
+        title=dict(text=title, font=dict(size=13), x=.5),
+        margin=dict(l=50, r=30, t=60, b=50),
+        hoverlabel=dict(bgcolor="#1e293b", bordercolor="#334155"),
+    )
+    try:
+        if chart_type == "histogram":
+            fig = px.histogram(df, x=x_col, color_discrete_sequence=["#667eea"],
+                               nbins=25, opacity=.88)
+            fig.update_traces(marker_line_width=0)
+        elif chart_type == "scatter":
+            plot_df = (df.groupby(entity_col)[[x_col, y_col]].mean().reset_index()
+                       if entity_col and entity_col in df.columns
+                       else df[[x_col, y_col]].dropna())
+            fig = px.scatter(plot_df, x=x_col, y=y_col,
+                             hover_name=entity_col if entity_col in plot_df.columns else None,
+                             trendline="ols", trendline_color_override="#f093fb",
+                             color_discrete_sequence=["#667eea"])
+        elif chart_type == "bar":
+            agg = (df.groupby(x_col)[y_col].mean()
+                   .sort_values(ascending=False).head(25).reset_index())
+            fig = px.bar(agg, x=y_col, y=x_col, orientation="h",
+                         color=y_col,
+                         color_continuous_scale=["#667eea", "#764ba2", "#f093fb"])
+            fig.update_coloraxes(showscale=False)
+        elif chart_type == "line":
+            agg = (df.groupby(x_col)[y_col].mean().reset_index().sort_values(x_col))
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=agg[x_col], y=agg[y_col], mode="lines+markers",
+                line=dict(color="#667eea", width=2.5),
+                marker=dict(size=7, color="#764ba2"),
+                fill="tozeroy", fillcolor="rgba(102,126,234,.1)",
+                name=y_col.replace("_", " ").title(),
+            ))
+        elif chart_type == "heatmap":
+            numeric_df = df.select_dtypes(include="number")
+            corr = numeric_df.corr().round(2)
+            labels = [c.replace("_", "<br>") for c in corr.columns]
+            fig = px.imshow(
+                corr, x=labels, y=labels,
+                color_continuous_scale=px.colors.diverging.RdBu_r[::-1],
+                zmin=-1, zmax=1, text_auto=".2f", aspect="auto",
+            )
+            fig.update_traces(textfont=dict(size=8))
+        else:
+            return None
+        fig.update_layout(**DARK)
+        return fig
+    except Exception:
+        return None
 
 # ── Results tabs ──────────────────────────────────────────────────────
 r        = st.session_state.results
@@ -1049,7 +1124,13 @@ viz      = r["viz"]
 report   = r["report"]
 question = r["question"]
 
-st.markdown(f"#### Results — *{question}*")
+st.markdown(f"""
+<div style="margin-bottom:1rem;">
+  <div style="font-size:.7rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+              color:#667eea;margin-bottom:.3rem;">Analysis Complete</div>
+  <div style="font-size:1.4rem;font-weight:800;color:#0f172a;line-height:1.3;">{question or "Exploratory Analysis"}</div>
+</div>
+""", unsafe_allow_html=True)
 
 # ── Quality score card ────────────────────────────────────────────────
 if quality:
@@ -1091,6 +1172,21 @@ if quality:
                 st.markdown(f"**{i}.** {rec}")
 
     st.divider()
+
+# KPI row
+kpi_cols = st.columns(6, gap="small")
+kpi_data = [
+    ("🏅", "Quality",   f"{int(quality.get('overall_score',0))}/100",  quality.get("grade","?")),
+    ("💡", "Insights",  len(analyst.get("insights",[])),               "AI-generated"),
+    ("🔎", "Anomalies", len(anomaly.get("anomalies",[])),              f"{anomaly.get('severity_counts',{}).get('high',0)} high"),
+    ("🎯", "Decisions", len(decision.get("decisions",[])),             "prioritised"),
+    ("📈", "Forecasts", len(forecast.get("forecasts",[])),            "trends"),
+    ("🔬", "Stat Tests",len(stats.get("tests_run",[])),               f"{len(stats.get('significant_findings',[]))} sig."),
+]
+for col, (icon, label, val, sub) in zip(kpi_cols, kpi_data):
+    col.metric(f"{icon} {label}", val, sub)
+
+st.divider()
 
 tab_insights, tab_charts, tab_anomalies, tab_decisions, tab_forecasts, tab_stats, tab_report = st.tabs(
     ["💡  Insights", "📊  Charts", "🔎  Anomalies", "🎯  Decisions", "📈  Forecasts", "🔬  Statistics", "📄  Report"]
@@ -1144,29 +1240,28 @@ with tab_insights:
 
 # ── Tab 2: Charts ─────────────────────────────────────────────────────
 with tab_charts:
-    paths = viz.get("figure_paths", [])
     metas = analyst.get("suggested_charts", [])
+    df_chart = wrangler["dataframe"]
+    col_desc_c = analyst.get("column_descriptions", {})
 
-    if not paths:
-        st.info("No charts were generated.")
+    if not metas:
+        st.info("No charts were suggested.")
     else:
-        st.caption(
-            f"{viz['charts_rendered']} chart(s) rendered · "
-            f"{viz['charts_skipped']} skipped"
-        )
-        for i in range(0, len(paths), 2):
+        st.caption(f"{len(metas)} interactive Plotly charts — hover to explore, scroll to zoom")
+        for i in range(0, len(metas), 2):
             cols = st.columns(2, gap="medium")
             for j in range(2):
                 idx = i + j
-                if idx < len(paths) and os.path.exists(paths[idx]):
-                    with cols[j]:
-                        title = (
-                            metas[idx].get("title", "")
-                            if idx < len(metas) else ""
-                        )
-                        if title:
-                            st.caption(title)
-                        st.image(paths[idx], use_container_width=True)
+                if idx >= len(metas): break
+                with cols[j]:
+                    fig = _plotly(df_chart, metas[idx], col_desc_c)
+                    if fig:
+                        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": True})
+                    else:
+                        path = viz.get("figure_paths", [])[idx] if idx < len(viz.get("figure_paths",[])) else None
+                        if path and os.path.exists(path):
+                            st.caption(metas[idx].get("title",""))
+                            st.image(path, use_container_width=True)
 
 # ── Tab 3: Anomalies ─────────────────────────────────────────────────
 with tab_anomalies:
@@ -1946,3 +2041,12 @@ if st.session_state.results:
                     st.session_state.auto_run_question  = True
                     st.session_state.blindspots         = None
                     st.rerun()
+
+# ── Global footer ─────────────────────────────────────────────────────
+st.markdown("""
+<div class="aria-footer">
+  <strong>Aria v2.0</strong> &nbsp;·&nbsp; 18 AI Agents &nbsp;·&nbsp;
+  Powered by Claude · Anthropic &nbsp;·&nbsp;
+  Built by <strong>Kiran Kumar Reddy Konapalli</strong>
+</div>
+""", unsafe_allow_html=True)
