@@ -186,6 +186,16 @@ div[data-testid="stBaseButton-secondary"] button p {
 div[data-testid="stBaseButton-secondary"] button span {
     color:#5b21b6 !important;
 }
+[data-testid="stBaseButton-secondary"] p {
+    color:#5b21b6 !important;
+    font-weight:700 !important;
+    opacity:1 !important;
+    visibility:visible !important;
+}
+[data-testid="stBaseButton-secondary"] {
+    color:#5b21b6 !important;
+    opacity:1 !important;
+}
 
 /* ── Metric cards ────────────────────────────────────────── */
 [data-testid="stMetric"] {
