@@ -126,10 +126,13 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
     border:1.5px dashed rgba(255,255,255,0.3) !important;
     border-radius:12px !important;
 }
+[data-testid="stFileUploaderDropzoneInput"] + div button,
 [data-testid="stFileUploaderDropzone"] button {
-    background-color:#667eea !important;
+    background:linear-gradient(135deg,#667eea,#764ba2) !important;
     color:white !important;
+    font-weight:600 !important;
     border:none !important;
+    padding:0.5rem 1.5rem !important;
     border-radius:8px !important;
 }
 [data-testid="stFileUploaderDropzone"] p,
@@ -164,19 +167,22 @@ button[kind="primary"]:hover {
     transform:translateY(-1px) !important;
 }
 /* Demo button — secondary style on dark sidebar */
+[data-testid="stBaseButton-secondary"],
 [data-testid="stSidebar"] button[kind="secondary"],
 [data-testid="stSidebar"] button:not([kind="primary"]) {
-    background:#ffffff !important;
-    border:1.5px solid rgba(102,126,234,.4) !important;
+    background:white !important;
     color:#667eea !important;
-    font-weight:700 !important;
+    border:2px solid #667eea !important;
+    font-weight:600 !important;
     border-radius:12px !important;
     transition:all .2s !important;
 }
+[data-testid="stBaseButton-secondary"]:hover,
 [data-testid="stSidebar"] button[kind="secondary"]:hover,
 [data-testid="stSidebar"] button:not([kind="primary"]):hover {
     background:#f0f2ff !important;
-    border-color:#667eea !important;
+    border-color:#764ba2 !important;
+    color:#764ba2 !important;
     transform:translateY(-1px) !important;
 }
 
@@ -614,7 +620,7 @@ with st.sidebar:
 
     st.divider()
     run_btn  = st.button("▶  Run Analysis",          type="primary", use_container_width=True)
-    demo_btn = st.button("⚡  Demo: Florida Health", use_container_width=True)
+    demo_btn = st.button("⚡ Demo: Florida Health", use_container_width=True)
 
     if st.session_state.results:
         st.success("Last run complete")
