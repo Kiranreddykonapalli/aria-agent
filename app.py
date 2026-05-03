@@ -55,7 +55,7 @@ INSIGHT_ICONS   = ["🔑", "📊", "💡", "📌", "🎯"]
 INSIGHT_COLORS  = ["#1a56db", "#7c3aed", "#059669", "#d97706", "#dc2626"]
 
 # ── CSS ───────────────────────────────────────────────────────────────
-st.markdown("""
+st.html("""
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
 <style>
@@ -527,7 +527,7 @@ hr { border-color:rgba(102,126,234,.12) !important; }
 }
 .aria-footer strong { color:#667eea; }
 </style>
-""", unsafe_allow_html=True)
+""")
 
 # ── Session state ─────────────────────────────────────────────────────
 for key, default in [
@@ -1802,7 +1802,8 @@ if st.session_state.results:
         st.markdown(
             "**Examples:** &nbsp; `What if obesity dropped 5% in every county?` &nbsp;·&nbsp; "
             "`What if median income increased by $10,000?` &nbsp;·&nbsp; "
-            "`What if uninsured rate fell to 10% in all counties?`"
+            "`What if uninsured rate fell to 10% in all counties?`",
+            unsafe_allow_html=True,
         )
         wi_scenario = st.text_input(
             "Your scenario",
@@ -1848,7 +1849,8 @@ if st.session_state.results:
                     f"**Rows changed:** {changes.get('rows_changed', 0):,}  &nbsp;·&nbsp;  "
                     f"**{parsed['target_column']}:** "
                     f"{changes.get('original_mean', 0):.4g} → {changes.get('simulated_mean', 0):.4g} "
-                    f"({changes.get('mean_delta', 0):+.4g})"
+                    f"({changes.get('mean_delta', 0):+.4g})",
+                    unsafe_allow_html=True,
                 )
 
                 st.divider()
