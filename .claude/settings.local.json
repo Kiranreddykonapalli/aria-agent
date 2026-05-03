@@ -15,7 +15,8 @@
       "Bash(git remote *)",
       "Bash(git branch *)",
       "Bash(git push *)",
-      "Bash(pip install *)"
+      "Bash(pip install *)",
+      "Bash(python -c \"import plotly; print\\('plotly', plotly.__version__\\)\")"
     ]
   }
 }
