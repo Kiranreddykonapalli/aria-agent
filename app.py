@@ -121,21 +121,20 @@ html, body, .stApp, [data-testid="stAppViewContainer"] {
 }
 [data-testid="stSidebar"] h1,[data-testid="stSidebar"] h2,
 [data-testid="stSidebar"] h3 { color:#fff !important; }
-[data-testid="stSidebar"] [data-testid="stFileUploader"] {
-    background:rgba(255,255,255,.07) !important;
-    border:2px dashed rgba(255,255,255,.45) !important;
-    border-radius:12px !important; padding:0.4rem !important;
+[data-testid="stFileUploaderDropzone"] {
+    background-color:rgba(255,255,255,0.05) !important;
+    border:1.5px dashed rgba(255,255,255,0.3) !important;
+    border-radius:12px !important;
 }
-[data-testid="stSidebar"] [data-testid="stFileUploader"] * {
-    color:rgba(255,255,255,.85) !important;
+[data-testid="stFileUploaderDropzone"] button {
+    background-color:#667eea !important;
+    color:white !important;
+    border:none !important;
+    border-radius:8px !important;
 }
-[data-testid="stSidebar"] [data-testid="stFileUploader"] button {
-    background:rgba(255,255,255,.12) !important;
-    border:1px solid rgba(255,255,255,.3) !important;
-    color:#fff !important;
-}
-[data-testid="stSidebar"] [data-testid="stFileDropzone"] {
-    background:rgba(255,255,255,.05) !important;
+[data-testid="stFileUploaderDropzone"] p,
+[data-testid="stFileUploaderDropzone"] small {
+    color:rgba(255,255,255,0.6) !important;
 }
 [data-testid="stSidebar"] textarea {
     background:rgba(255,255,255,.08) !important;
